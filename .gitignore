@@ -1,0 +1,5 @@
+.env
+.local-state/
+*.log
+openbao-init.json
+OPENBAO-RECOVERY-README.txt
