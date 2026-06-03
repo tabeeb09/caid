@@ -138,6 +138,13 @@ write_env_file() {
   esac
 
   prompt_if_missing KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME "Initial Keycloak admin username" "admin"
+  prompt_if_missing APP_PUBLIC_URL "Website public URL" "https://app.example.com"
+  prompt_if_missing MEDIA_PUBLIC_URL "Media public URL" "https://media.example.com"
+  prompt_if_missing OAUTH2_PROXY_PUBLIC_URL "OAuth2 Proxy public URL for protected admin dashboards" "https://oauth2.example.com"
+  prompt_if_missing RUSTFS_BUCKET "RustFS/S3 media bucket name" "public-media"
+  prompt_if_missing GOOGLE_CLIENT_ID "Optional Google OAuth client ID; leave blank to skip" ""
+  prompt_if_missing GOOGLE_CLIENT_SECRET "Optional Google OAuth client secret; leave blank to skip" "" true
+  prompt_if_missing ALLOWED_EMAILS "Optional comma-separated allowed emails/domains; leave blank to skip" ""
 
   if [[ -z "${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}" ]]; then
     KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="$(random_b64url 24)"
@@ -173,6 +180,14 @@ KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=$KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
 
 APP_POLICY_NAME=$APP_POLICY_NAME
 APPROLE_NAME=$APPROLE_NAME
+
+APP_PUBLIC_URL=$APP_PUBLIC_URL
+MEDIA_PUBLIC_URL=$MEDIA_PUBLIC_URL
+OAUTH2_PROXY_PUBLIC_URL=$OAUTH2_PROXY_PUBLIC_URL
+RUSTFS_BUCKET=$RUSTFS_BUCKET
+GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+ALLOWED_EMAILS=${ALLOWED_EMAILS:-}
 
 OPENBAO_IMAGE=$OPENBAO_IMAGE
 KEYCLOAK_IMAGE=$KEYCLOAK_IMAGE
@@ -590,9 +605,9 @@ bootstrap_keycloak() {
   oauth_secret="$(random_b64url 32)"
   admin_secret="$(random_b64url 32)"
 
-  website_client_uuid="$(ensure_keycloak_client website "$website_secret" "https://app.example.com/api/auth/callback/keycloak" "https://app.example.com" false)"
-  ensure_keycloak_client oauth2-proxy "$oauth_secret" "https://oauth2.example.com/oauth2/callback" "https://oauth2.example.com" false >/dev/null
-  ensure_keycloak_client website-admin-sync "$admin_secret" "https://app.example.com/*" "https://app.example.com" true >/dev/null
+  website_client_uuid="$(ensure_keycloak_client website "$website_secret" "$APP_PUBLIC_URL/api/auth/callback/keycloak" "$APP_PUBLIC_URL" false)"
+  ensure_keycloak_client oauth2-proxy "$oauth_secret" "$OAUTH2_PROXY_PUBLIC_URL/oauth2/callback" "$OAUTH2_PROXY_PUBLIC_URL" false >/dev/null
+  ensure_keycloak_client website-admin-sync "$admin_secret" "$APP_PUBLIC_URL/*" "$APP_PUBLIC_URL" true >/dev/null
 
   for role in owner media_admin editor viewer infra_admin; do
     kcadm create "clients/$website_client_uuid/roles" -r "$KEYCLOAK_REALM" -s "name=$role" >/dev/null 2>&1 || true
@@ -620,15 +635,43 @@ seed_app_secrets() {
   local website_secret="$1"
   local oauth_secret="$2"
   local admin_secret="$3"
-  local auth_secret s3_access s3_secret oauth_cookie
+  local auth_secret s3_access s3_secret oauth_cookie website_payload
   auth_secret="$(openssl rand -base64 32)"
   s3_access="rustfs-$(random_b64url 18)"
   s3_secret="$(random_b64url 32)"
   oauth_cookie="$(openssl rand -base64 32)"
 
-  write_kv website/prod "{\"data\":{\"AUTH_SECRET\":\"$auth_secret\",\"NEXTAUTH_SECRET\":\"$auth_secret\",\"NEXTAUTH_URL\":\"https://app.example.com\",\"NEXT_PUBLIC_SITE_URL\":\"https://app.example.com\",\"NEXT_PUBLIC_MEDIA_BASE_URL\":\"https://media.example.com\",\"KEYCLOAK_ISSUER\":\"https://$AUTH_HOST/realms/$KEYCLOAK_REALM\",\"KEYCLOAK_CLIENT_ID\":\"website\",\"KEYCLOAK_CLIENT_SECRET\":\"$website_secret\",\"KEYCLOAK_REQUIRED_MEDIA_ROLES\":\"owner,media_admin\",\"KEYCLOAK_ROLE_CLAIM_PATH\":\"resource_access.website.roles\"}}"
-  write_kv rustfs/prod "{\"data\":{\"NEXT_PUBLIC_MEDIA_BASE_URL\":\"https://media.example.com\",\"S3_ENDPOINT\":\"http://rustfs:9000\",\"S3_PUBLIC_ENDPOINT\":\"https://media.example.com\",\"S3_BUCKET\":\"public-media\",\"S3_REGION\":\"us-east-1\",\"S3_ACCESS_KEY_ID\":\"$s3_access\",\"S3_SECRET_ACCESS_KEY\":\"$s3_secret\"}}"
-  write_kv oauth2-proxy/prod "{\"data\":{\"OAUTH2_PROXY_CLIENT_ID\":\"oauth2-proxy\",\"OAUTH2_PROXY_CLIENT_SECRET\":\"$oauth_secret\",\"OAUTH2_PROXY_COOKIE_SECRET\":\"$oauth_cookie\",\"OAUTH2_PROXY_REDIRECT_URL\":\"https://oauth2.example.com/oauth2/callback\"}}"
+  website_payload="$(AUTH_SECRET_VALUE="$auth_secret" \
+    WEBSITE_SECRET="$website_secret" \
+    APP_PUBLIC_URL="$APP_PUBLIC_URL" \
+    MEDIA_PUBLIC_URL="$MEDIA_PUBLIC_URL" \
+    AUTH_HOST="$AUTH_HOST" \
+    KEYCLOAK_REALM="$KEYCLOAK_REALM" \
+    GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}" \
+    GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}" \
+    ALLOWED_EMAILS="${ALLOWED_EMAILS:-}" \
+    node -e "
+const data = {
+  AUTH_SECRET: process.env.AUTH_SECRET_VALUE,
+  NEXTAUTH_SECRET: process.env.AUTH_SECRET_VALUE,
+  NEXTAUTH_URL: process.env.APP_PUBLIC_URL,
+  NEXT_PUBLIC_SITE_URL: process.env.APP_PUBLIC_URL,
+  NEXT_PUBLIC_MEDIA_BASE_URL: process.env.MEDIA_PUBLIC_URL,
+  KEYCLOAK_ISSUER: 'https://' + process.env.AUTH_HOST + '/realms/' + process.env.KEYCLOAK_REALM,
+  KEYCLOAK_CLIENT_ID: 'website',
+  KEYCLOAK_CLIENT_SECRET: process.env.WEBSITE_SECRET,
+  KEYCLOAK_REQUIRED_MEDIA_ROLES: 'owner,media_admin',
+  KEYCLOAK_ROLE_CLAIM_PATH: 'resource_access.website.roles'
+};
+if (process.env.GOOGLE_CLIENT_ID) data.GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+if (process.env.GOOGLE_CLIENT_SECRET) data.GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+if (process.env.ALLOWED_EMAILS) data.ALLOWED_EMAILS = process.env.ALLOWED_EMAILS;
+process.stdout.write(JSON.stringify({ data }));
+")"
+
+  write_kv website/prod "$website_payload"
+  write_kv rustfs/prod "{\"data\":{\"NEXT_PUBLIC_MEDIA_BASE_URL\":\"$MEDIA_PUBLIC_URL\",\"S3_ENDPOINT\":\"http://rustfs:9000\",\"S3_PUBLIC_ENDPOINT\":\"$MEDIA_PUBLIC_URL\",\"S3_BUCKET\":\"$RUSTFS_BUCKET\",\"S3_REGION\":\"us-east-1\",\"S3_ACCESS_KEY_ID\":\"$s3_access\",\"S3_SECRET_ACCESS_KEY\":\"$s3_secret\"}}"
+  write_kv oauth2-proxy/prod "{\"data\":{\"OAUTH2_PROXY_CLIENT_ID\":\"oauth2-proxy\",\"OAUTH2_PROXY_CLIENT_SECRET\":\"$oauth_secret\",\"OAUTH2_PROXY_COOKIE_SECRET\":\"$oauth_cookie\",\"OAUTH2_PROXY_REDIRECT_URL\":\"$OAUTH2_PROXY_PUBLIC_URL/oauth2/callback\"}}"
   write_kv keycloak/prod "{\"data\":{\"KEYCLOAK_ADMIN_REALM\":\"$KEYCLOAK_REALM\",\"KEYCLOAK_ADMIN_CLIENT_ID\":\"website-admin-sync\",\"KEYCLOAK_ADMIN_CLIENT_SECRET\":\"$admin_secret\"}}"
 }
 

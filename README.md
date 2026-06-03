@@ -29,6 +29,13 @@ BAO_HOST
 ZTNA_PROVIDER
 VPN_CIDR
 KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME
+APP_PUBLIC_URL
+MEDIA_PUBLIC_URL
+OAUTH2_PROXY_PUBLIC_URL
+RUSTFS_BUCKET
+GOOGLE_CLIENT_ID, optional
+GOOGLE_CLIENT_SECRET, optional
+ALLOWED_EMAILS, optional
 ```
 
 `ZTNA_PROVIDER` can be:
@@ -49,7 +56,7 @@ The overlay choice and setup key are saved in:
 /etc/caid/caid.env
 ```
 
-That file is root-only and reused on later runs.
+That file is root-only and reused on later runs. App URL settings and optional provider values are saved there too.
 
 It generates:
 
@@ -60,6 +67,15 @@ OpenBao root token
 OpenBao unseal key
 Keycloak client secrets
 OpenBao AppRole credentials
+```
+
+It writes the generated and prompted app values into OpenBao paths:
+
+```text
+kv/data/website/prod
+kv/data/rustfs/prod
+kv/data/oauth2-proxy/prod
+kv/data/keycloak/prod
 ```
 
 ## Important Recovery Output
