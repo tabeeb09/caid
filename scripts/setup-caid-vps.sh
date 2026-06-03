@@ -17,6 +17,7 @@ KEYCLOAK_REALM="${KEYCLOAK_REALM:-website}"
 APPROLE_NAME="${APPROLE_NAME:-website-vps}"
 APP_POLICY_NAME="${APP_POLICY_NAME:-website-runtime}"
 BAO_KV_MOUNT="${BAO_KV_MOUNT:-kv}"
+ZTNA_PROVIDER="${ZTNA_PROVIDER:-}"
 
 require_root() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
@@ -113,7 +114,29 @@ write_env_file() {
 
   prompt_if_missing AUTH_HOST "Keycloak/auth private hostname" "auth.$host_default"
   prompt_if_missing BAO_HOST "OpenBao private hostname" "bao.$host_default"
-  prompt_if_missing VPN_CIDR "VPN/private CIDR allowed to reach CAId UI, e.g. 10.8.0.0/24" ""
+  prompt_if_missing ZTNA_PROVIDER "Secure management overlay provider: none, tailscale, or netbird" "none"
+  ZTNA_PROVIDER="$(printf '%s' "$ZTNA_PROVIDER" | tr '[:upper:]' '[:lower:]')"
+
+  case "$ZTNA_PROVIDER" in
+    none)
+      prompt_if_missing VPN_CIDR "Optional CIDR allowed to reach CAId UI, e.g. your.home.ip/32; leave blank to skip firewall automation" ""
+      ;;
+    tailscale)
+      VPN_CIDR="${VPN_CIDR:-100.64.0.0/10}"
+      prompt_if_missing TAILSCALE_HOSTNAME "Tailscale device hostname" "caid"
+      prompt_if_missing TAILSCALE_AUTH_KEY "Optional Tailscale auth key; leave blank for browser login" "" true
+      ;;
+    netbird)
+      VPN_CIDR="${VPN_CIDR:-100.64.0.0/10}"
+      prompt_if_missing NETBIRD_SETUP_KEY "Optional NetBird setup key; leave blank for interactive login" "" true
+      prompt_if_missing NETBIRD_MANAGEMENT_URL "Optional NetBird management URL for self-hosted NetBird; leave blank for default cloud/control URL" ""
+      ;;
+    *)
+      echo "Unsupported ZTNA_PROVIDER=$ZTNA_PROVIDER. Use none, tailscale, or netbird." >&2
+      exit 1
+      ;;
+  esac
+
   prompt_if_missing KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME "Initial Keycloak admin username" "admin"
 
   if [[ -z "${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}" ]]; then
@@ -131,6 +154,11 @@ write_env_file() {
 AUTH_HOST=$AUTH_HOST
 BAO_HOST=$BAO_HOST
 VPN_CIDR=$VPN_CIDR
+ZTNA_PROVIDER=$ZTNA_PROVIDER
+TAILSCALE_HOSTNAME=${TAILSCALE_HOSTNAME:-}
+TAILSCALE_AUTH_KEY=${TAILSCALE_AUTH_KEY:-}
+NETBIRD_SETUP_KEY=${NETBIRD_SETUP_KEY:-}
+NETBIRD_MANAGEMENT_URL=${NETBIRD_MANAGEMENT_URL:-}
 
 BAO_PORT=8200
 BAO_ADDR=http://openbao:8200
@@ -152,6 +180,68 @@ POSTGRES_IMAGE=$POSTGRES_IMAGE
 CADDY_IMAGE=$CADDY_IMAGE
 EOF
   chmod 600 "$ENV_FILE"
+}
+
+install_tailscale() {
+  if ! command -v tailscale >/dev/null 2>&1; then
+    echo "Installing Tailscale..."
+    curl -fsSL https://tailscale.com/install.sh | sh
+  fi
+
+  if tailscale status >/dev/null 2>&1; then
+    echo "Tailscale is already connected."
+    return
+  fi
+
+  echo "Connecting Tailscale..."
+  if [[ -n "${TAILSCALE_AUTH_KEY:-}" ]]; then
+    tailscale up --auth-key "$TAILSCALE_AUTH_KEY" --hostname "${TAILSCALE_HOSTNAME:-caid}" --ssh
+  else
+    echo "No TAILSCALE_AUTH_KEY provided. Tailscale will print a browser login URL."
+    tailscale up --hostname "${TAILSCALE_HOSTNAME:-caid}" --ssh
+  fi
+}
+
+install_netbird() {
+  if ! command -v netbird >/dev/null 2>&1; then
+    echo "Installing NetBird..."
+    curl -fsSL https://pkgs.netbird.io/install.sh | sh
+  fi
+
+  if netbird status >/dev/null 2>&1; then
+    echo "NetBird is already connected."
+    return
+  fi
+
+  echo "Connecting NetBird..."
+  local args=()
+  if [[ -n "${NETBIRD_SETUP_KEY:-}" ]]; then
+    args+=(--setup-key "$NETBIRD_SETUP_KEY")
+  fi
+  if [[ -n "${NETBIRD_MANAGEMENT_URL:-}" ]]; then
+    args+=(--management-url "$NETBIRD_MANAGEMENT_URL")
+  fi
+
+  if ((${#args[@]} > 0)); then
+    netbird up "${args[@]}"
+  else
+    echo "No NETBIRD_SETUP_KEY provided. NetBird will use its interactive login flow if supported."
+    netbird up
+  fi
+}
+
+configure_management_overlay() {
+  case "${ZTNA_PROVIDER:-none}" in
+    none)
+      echo "No management overlay selected."
+      ;;
+    tailscale)
+      install_tailscale
+      ;;
+    netbird)
+      install_netbird
+      ;;
+  esac
 }
 
 write_stack_files() {
@@ -561,6 +651,7 @@ main() {
   write_env_file
   # shellcheck disable=SC1090
   source "$ENV_FILE"
+  configure_management_overlay
   write_stack_files
   configure_firewall
   pull_and_start_stack

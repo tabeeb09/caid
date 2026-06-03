@@ -26,9 +26,30 @@ The script prompts for:
 ```text
 AUTH_HOST
 BAO_HOST
+ZTNA_PROVIDER
 VPN_CIDR
 KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME
 ```
+
+`ZTNA_PROVIDER` can be:
+
+```text
+none
+tailscale
+netbird
+```
+
+If `tailscale` is selected, the script installs Tailscale if missing and prompts for an optional Tailscale auth key. If the key is blank, Tailscale prints its normal browser login URL.
+
+If `netbird` is selected, the script installs NetBird if missing and prompts for an optional setup key and management URL. If the setup key is blank, NetBird uses its interactive login flow where supported.
+
+The overlay choice and setup key are saved in:
+
+```text
+/etc/caid/caid.env
+```
+
+That file is root-only and reused on later runs.
 
 It generates:
 
@@ -79,6 +100,8 @@ You can pass values through environment variables:
 ```bash
 sudo AUTH_HOST=auth.internal.example.com \
   BAO_HOST=bao.internal.example.com \
+  ZTNA_PROVIDER=tailscale \
+  TAILSCALE_AUTH_KEY=tskey-auth-... \
   VPN_CIDR=10.8.0.0/24 \
   KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=admin \
   bash scripts/setup-caid-vps.sh
