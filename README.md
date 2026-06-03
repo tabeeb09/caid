@@ -109,6 +109,59 @@ Paste those into the app VPS bootstrap script.
 /var/lib/caid   persistent container data
 ```
 
+## Startup Service
+
+The setup script installs and enables:
+
+```text
+caid.service
+```
+
+Useful commands:
+
+```bash
+sudo systemctl status caid
+sudo systemctl restart caid
+sudo systemctl stop caid
+```
+
+The service runs:
+
+```text
+docker compose up -d
+```
+
+from `/srv/caid`, so OpenBao, Keycloak, Caddy, and Postgres come back after VPS reboot.
+
+## OpenBao UI
+
+OpenBao is available at:
+
+```text
+https://<BAO_HOST>
+```
+
+Use the root token from:
+
+```text
+/etc/caid/openbao-init.json
+```
+
+for first setup or emergency recovery. For normal operation, create narrower admin policies/tokens in OpenBao.
+
+To add a new app manually:
+
+```text
+1. Open https://<BAO_HOST>
+2. Log in.
+3. Go to Secrets -> kv.
+4. Create a new path, for example my-new-app/prod.
+5. Add the app's key/value secrets.
+6. Create a policy allowing read access to that path.
+7. Create an AppRole using that policy.
+8. Copy the AppRole role_id and secret_id to that app VPS bootstrap.
+```
+
 ## Non-Interactive Use
 
 You can pass values through environment variables:

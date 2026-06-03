@@ -259,6 +259,30 @@ configure_management_overlay() {
   esac
 }
 
+install_caid_systemd_service() {
+  cat >/etc/systemd/system/caid.service <<EOF
+[Unit]
+Description=CAId central authorization and identity stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=$CAID_HOME
+ExecStart=/usr/bin/docker compose --env-file $ENV_FILE -f $CAID_HOME/docker-compose.yaml up -d
+ExecStop=/usr/bin/docker compose --env-file $ENV_FILE -f $CAID_HOME/docker-compose.yaml stop
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable caid.service
+}
+
 write_stack_files() {
   mkdir -p \
     "$CAID_HOME" \
@@ -696,6 +720,7 @@ main() {
   source "$ENV_FILE"
   configure_management_overlay
   write_stack_files
+  install_caid_systemd_service
   configure_firewall
   pull_and_start_stack
   wait_for_openbao
