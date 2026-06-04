@@ -72,28 +72,43 @@ install_missing_dependencies() {
   local manager
   manager="$(detect_pkg_manager)"
 
-  if command -v docker >/dev/null 2>&1 &&
-    docker compose version >/dev/null 2>&1 &&
-    command -v curl >/dev/null 2>&1 &&
+  if command -v curl >/dev/null 2>&1 &&
     command -v git >/dev/null 2>&1 &&
     command -v openssl >/dev/null 2>&1 &&
-    command -v node >/dev/null 2>&1; then
+    command -v node >/dev/null 2>&1 &&
+    command -v docker >/dev/null 2>&1 &&
+    docker compose version >/dev/null 2>&1; then
     return
   fi
 
   case "$manager" in
     apt)
       apt-get update
-      apt-get install -y ca-certificates curl git openssl nodejs docker.io docker-compose-plugin ufw
+      apt-get install -y ca-certificates curl git openssl nodejs ufw
       ;;
     dnf)
-      dnf install -y ca-certificates curl git openssl nodejs docker docker-compose-plugin ufw ||
-        dnf install -y ca-certificates curl git openssl nodejs docker docker-compose-plugin
+      dnf install -y ca-certificates curl git openssl nodejs ufw ||
+        dnf install -y ca-certificates curl git openssl nodejs
       ;;
     yum)
-      yum install -y ca-certificates curl git openssl nodejs docker docker-compose-plugin
+      yum install -y ca-certificates curl git openssl nodejs
       ;;
   esac
+
+  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+    echo "Installing Docker Engine and Compose plugin from Docker's official installer..."
+    curl -fsSL https://get.docker.com | sh
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker installation failed: docker command is unavailable." >&2
+    exit 1
+  fi
+
+  if ! docker compose version >/dev/null 2>&1; then
+    echo "Docker installation failed: docker compose plugin is unavailable." >&2
+    exit 1
+  fi
 }
 
 enable_docker() {
