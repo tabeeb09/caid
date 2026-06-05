@@ -13,6 +13,17 @@ The script does not assume Docker is already installed. It installs missing host
 
 ## Blank VPS Quick Start
 
+Minimal curl-based install:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y curl
+curl -fsSL https://raw.githubusercontent.com/tabeeb09/caid/main/scripts/setup-caid-vps.sh -o setup-caid-vps.sh
+sudo bash setup-caid-vps.sh
+```
+
+Git-based install:
+
 ```bash
 sudo apt-get update
 sudo apt-get install -y git
@@ -36,6 +47,24 @@ RUSTFS_BUCKET
 GOOGLE_CLIENT_ID, optional
 GOOGLE_CLIENT_SECRET, optional
 ALLOWED_EMAILS, optional
+```
+
+`AUTH_HOST` and `BAO_HOST` must be plain hostnames, not URLs and not `host:port` values.
+
+Good:
+
+```text
+auth.example.internal
+bao.example.internal
+auth.localhost
+bao.localhost
+```
+
+Bad:
+
+```text
+localhost:8080
+https://auth.example.internal
 ```
 
 `ZTNA_PROVIDER` can be:
@@ -132,6 +161,8 @@ docker compose up -d
 ```
 
 from `/srv/caid`, so OpenBao, Keycloak, Caddy, and Postgres come back after VPS reboot.
+
+OpenBao itself intentionally comes back sealed after an OpenBao process restart unless you configure a separate auto-unseal mechanism. The setup script can unseal it again using `/etc/caid/openbao-init.json`, or you can unseal manually through OpenBao using the saved unseal key. Keep the recovery file offline-backed-up and root-only.
 
 ## OpenBao UI
 
