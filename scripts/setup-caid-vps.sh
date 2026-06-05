@@ -578,7 +578,7 @@ bao() {
 
 extract_json_field() {
   local field="$1"
-  node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(0,'utf8'));const parts='$field'.split('.');let cur=data;for(const part of parts){cur=cur?.[part];} if(cur===undefined){process.exit(1)} if(typeof cur==='object'){process.stdout.write(JSON.stringify(cur))} else {process.stdout.write(String(cur))}"
+  node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(0,'utf8'));const parts='$field'.split('.');let cur=data;for(const part of parts){cur=cur && Object.prototype.hasOwnProperty.call(cur, part) ? cur[part] : undefined;} if(cur===undefined){process.exit(1)} if(typeof cur==='object'){process.stdout.write(JSON.stringify(cur))} else {process.stdout.write(String(cur))}"
 }
 
 init_and_unseal_openbao() {
