@@ -68,6 +68,22 @@ prompt_optional_if_unset() {
   prompt_if_missing "$var_name" "$prompt" "$default" "$secret"
 }
 
+validate_plain_hostname() {
+  local var_name="$1"
+  local value="${!var_name:-}"
+
+  if [[ -z "$value" ]]; then
+    echo "$var_name is required." >&2
+    exit 1
+  fi
+
+  if [[ "$value" == *"://"* || "$value" == *"/"* || "$value" == *":"* ]]; then
+    echo "$var_name must be a plain hostname, not a URL or host:port value: $value" >&2
+    echo "Example: auth.example.internal, bao.example.internal, auth.localhost, or bao.localhost" >&2
+    exit 1
+  fi
+}
+
 detect_pkg_manager() {
   if command -v apt-get >/dev/null 2>&1; then
     echo apt
@@ -142,6 +158,13 @@ write_env_file() {
 
   prompt_if_missing AUTH_HOST "Keycloak/auth private hostname" "auth.$host_default"
   prompt_if_missing BAO_HOST "OpenBao private hostname" "bao.$host_default"
+  validate_plain_hostname AUTH_HOST
+  validate_plain_hostname BAO_HOST
+  if [[ "$AUTH_HOST" == "$BAO_HOST" ]]; then
+    echo "AUTH_HOST and BAO_HOST must be different hostnames so Caddy can route Keycloak and OpenBao separately." >&2
+    exit 1
+  fi
+
   prompt_if_missing ZTNA_PROVIDER "Secure management overlay provider: none, tailscale, or netbird" "none"
   ZTNA_PROVIDER="$(printf '%s' "$ZTNA_PROVIDER" | tr '[:upper:]' '[:lower:]')"
 
