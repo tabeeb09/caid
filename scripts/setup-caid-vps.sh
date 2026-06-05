@@ -585,7 +585,7 @@ init_and_unseal_openbao() {
   local status_json initialized sealed root_token unseal_key created_init
   created_init=false
 
-  status_json="$(bao bao status -format=json)"
+  status_json="$(bao bao status -format=json || true)"
   initialized="$(printf '%s' "$status_json" | extract_json_field initialized)"
   sealed="$(printf '%s' "$status_json" | extract_json_field sealed)"
 
@@ -606,7 +606,7 @@ init_and_unseal_openbao() {
   root_token="$(node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(data.root_token)" "$RECOVERY_FILE")"
   unseal_key="$(node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(data.unseal_keys_b64[0])" "$RECOVERY_FILE")"
 
-  status_json="$(bao bao status -format=json)"
+  status_json="$(bao bao status -format=json || true)"
   sealed="$(printf '%s' "$status_json" | extract_json_field sealed)"
 
   if [[ "$sealed" == "true" ]]; then
