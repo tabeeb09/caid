@@ -581,7 +581,7 @@ wait_for_openbao() {
 }
 
 wait_for_keycloak() {
-  local deadline=$((SECONDS + 240))
+  local deadline=$((SECONDS + 600))
   until compose exec -T keycloak /opt/keycloak/bin/kcadm.sh config credentials \
     --server http://localhost:8080 \
     --realm master \
@@ -589,6 +589,12 @@ wait_for_keycloak() {
     --password "$KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null 2>&1; do
     if ((SECONDS >= deadline)); then
       echo "Timed out waiting for Keycloak admin login." >&2
+      echo "" >&2
+      echo "Keycloak container status:" >&2
+      compose ps keycloak >&2 || true
+      echo "" >&2
+      echo "Keycloak recent logs:" >&2
+      compose logs --tail=160 keycloak >&2 || true
       exit 1
     fi
     sleep 5
