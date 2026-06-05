@@ -442,6 +442,16 @@ EOF
   reverse_proxy keycloak:8080
 }
 EOF
+
+  # Runtime config is mounted read-only into non-root containers. Keep secrets in
+  # /etc/caid locked down, but make generated service config traversable/readable.
+  chmod 755 "$CAID_HOME" "$CAID_HOME/caddy" "$CAID_HOME/openbao" "$CAID_HOME/openbao/config" "$CAID_HOME/openbao/policies"
+  chmod 644 \
+    "$CAID_HOME/docker-compose.yaml" \
+    "$CAID_HOME/caddy/Caddyfile" \
+    "$CAID_HOME/openbao/config/openbao.hcl" \
+    "$CAID_HOME/openbao/policies/website-runtime.hcl" \
+    "$CAID_HOME/openbao/policies/admin-bootstrap.hcl"
 }
 
 configure_firewall() {
