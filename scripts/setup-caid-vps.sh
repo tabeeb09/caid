@@ -55,6 +55,19 @@ prompt_if_missing() {
   printf -v "$var_name" '%s' "$current"
 }
 
+prompt_optional_if_unset() {
+  local var_name="$1"
+  local prompt="$2"
+  local default="${3:-}"
+  local secret="${4:-false}"
+
+  if [[ "${!var_name+x}" == "x" ]]; then
+    return
+  fi
+
+  prompt_if_missing "$var_name" "$prompt" "$default" "$secret"
+}
+
 detect_pkg_manager() {
   if command -v apt-get >/dev/null 2>&1; then
     echo apt
@@ -134,17 +147,17 @@ write_env_file() {
 
   case "$ZTNA_PROVIDER" in
     none)
-      prompt_if_missing VPN_CIDR "Optional CIDR allowed to reach CAId UI, e.g. your.home.ip/32; leave blank to skip firewall automation" ""
+      prompt_optional_if_unset VPN_CIDR "Optional CIDR allowed to reach CAId UI, e.g. your.home.ip/32; leave blank to skip firewall automation" ""
       ;;
     tailscale)
       VPN_CIDR="${VPN_CIDR:-100.64.0.0/10}"
       prompt_if_missing TAILSCALE_HOSTNAME "Tailscale device hostname" "caid"
-      prompt_if_missing TAILSCALE_AUTH_KEY "Optional Tailscale auth key; leave blank for browser login" "" true
+      prompt_optional_if_unset TAILSCALE_AUTH_KEY "Optional Tailscale auth key; leave blank for browser login" "" true
       ;;
     netbird)
       VPN_CIDR="${VPN_CIDR:-100.64.0.0/10}"
-      prompt_if_missing NETBIRD_SETUP_KEY "Optional NetBird setup key; leave blank for interactive login" "" true
-      prompt_if_missing NETBIRD_MANAGEMENT_URL "Optional NetBird management URL for self-hosted NetBird; leave blank for default cloud/control URL" ""
+      prompt_optional_if_unset NETBIRD_SETUP_KEY "Optional NetBird setup key; leave blank for interactive login" "" true
+      prompt_optional_if_unset NETBIRD_MANAGEMENT_URL "Optional NetBird management URL for self-hosted NetBird; leave blank for default cloud/control URL" ""
       ;;
     *)
       echo "Unsupported ZTNA_PROVIDER=$ZTNA_PROVIDER. Use none, tailscale, or netbird." >&2
@@ -157,9 +170,9 @@ write_env_file() {
   prompt_if_missing MEDIA_PUBLIC_URL "Media public URL" "https://media.example.com"
   prompt_if_missing OAUTH2_PROXY_PUBLIC_URL "OAuth2 Proxy public URL for protected admin dashboards" "https://oauth2.example.com"
   prompt_if_missing RUSTFS_BUCKET "RustFS/S3 media bucket name" "public-media"
-  prompt_if_missing GOOGLE_CLIENT_ID "Optional Google OAuth client ID; leave blank to skip" ""
-  prompt_if_missing GOOGLE_CLIENT_SECRET "Optional Google OAuth client secret; leave blank to skip" "" true
-  prompt_if_missing ALLOWED_EMAILS "Optional comma-separated allowed emails/domains; leave blank to skip" ""
+  prompt_optional_if_unset GOOGLE_CLIENT_ID "Optional Google OAuth client ID; leave blank to skip" ""
+  prompt_optional_if_unset GOOGLE_CLIENT_SECRET "Optional Google OAuth client secret; leave blank to skip" "" true
+  prompt_optional_if_unset ALLOWED_EMAILS "Optional comma-separated allowed emails/domains; leave blank to skip" ""
 
   if [[ -z "${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}" ]]; then
     KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="$(random_b64url 24)"
