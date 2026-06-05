@@ -469,7 +469,44 @@ compose() {
   docker compose --env-file "$ENV_FILE" -f "$CAID_HOME/docker-compose.yaml" "$@"
 }
 
+validate_stack_files() {
+  local missing=false
+  local required_files=(
+    "$CAID_HOME/docker-compose.yaml"
+    "$CAID_HOME/openbao/config/openbao.hcl"
+    "$CAID_HOME/openbao/policies/website-runtime.hcl"
+    "$CAID_HOME/openbao/policies/admin-bootstrap.hcl"
+    "$CAID_HOME/caddy/Caddyfile"
+  )
+
+  for file in "${required_files[@]}"; do
+    if [[ ! -s "$file" ]]; then
+      echo "Missing required CAId stack file: $file" >&2
+      missing=true
+    fi
+  done
+
+  if [[ "$missing" == "true" ]]; then
+    echo "Refusing to start CAId stack until all generated config files exist." >&2
+    echo "Rerun the latest setup-caid-vps.sh; do not start Docker Compose directly from a partial /srv/caid directory." >&2
+    exit 1
+  fi
+
+  if ! grep -q 'bao server -config=/openbao/config/openbao.hcl' "$CAID_HOME/docker-compose.yaml"; then
+    echo "CAId compose file does not point OpenBao at /openbao/config/openbao.hcl." >&2
+    exit 1
+  fi
+
+  if ! grep -q 'listener "tcp"' "$CAID_HOME/openbao/config/openbao.hcl"; then
+    echo "OpenBao config exists but does not contain a TCP listener." >&2
+    exit 1
+  fi
+
+  compose config >/dev/null
+}
+
 pull_and_start_stack() {
+  validate_stack_files
   echo "Pulling CAId images..."
   compose pull
   echo "Starting CAId stack..."
@@ -478,9 +515,19 @@ pull_and_start_stack() {
 
 wait_for_openbao() {
   local deadline=$((SECONDS + 180))
-  until compose exec -T openbao sh -lc "bao status >/dev/null 2>&1 || true" >/dev/null 2>&1; do
+  until compose exec -T openbao sh -lc \
+    "test -r /openbao/config/openbao.hcl && wget -qO- http://127.0.0.1:8200/v1/sys/seal-status >/dev/null" >/dev/null 2>&1; do
     if ((SECONDS >= deadline)); then
       echo "Timed out waiting for OpenBao process." >&2
+      echo "" >&2
+      echo "OpenBao container status:" >&2
+      compose ps openbao >&2 || true
+      echo "" >&2
+      echo "OpenBao recent logs:" >&2
+      compose logs --tail=120 openbao >&2 || true
+      echo "" >&2
+      echo "Generated OpenBao config path expected on host:" >&2
+      echo "  $CAID_HOME/openbao/config/openbao.hcl" >&2
       exit 1
     fi
     sleep 3
