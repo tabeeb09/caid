@@ -765,13 +765,19 @@ ensure_initial_owner_user() {
     kcadm create users -r "$KEYCLOAK_REALM" \
       -s "username=$username" \
       -s "email=$email" \
+      -s "firstName=Website" \
+      -s "lastName=Owner" \
       -s enabled=true \
-      -s emailVerified=true >/dev/null
+      -s emailVerified=true \
+      -s 'requiredActions=[]' >/dev/null
   else
     kcadm update "users/$user_id" -r "$KEYCLOAK_REALM" \
       -s "email=$email" \
+      -s "firstName=Website" \
+      -s "lastName=Owner" \
       -s enabled=true \
-      -s emailVerified=true >/dev/null
+      -s emailVerified=true \
+      -s 'requiredActions=[]' >/dev/null
   fi
 
   kcadm set-password -r "$KEYCLOAK_REALM" \
