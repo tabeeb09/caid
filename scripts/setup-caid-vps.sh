@@ -189,6 +189,8 @@ write_env_file() {
   esac
 
   prompt_if_missing KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME "Initial Keycloak admin username" "admin"
+  prompt_if_missing INITIAL_OWNER_USERNAME "Initial website owner username" "owner"
+  prompt_if_missing INITIAL_OWNER_EMAIL "Initial website owner email" "owner@$AUTH_HOST"
   prompt_if_missing APP_PUBLIC_URL "Website public URL" "https://app.example.com"
   prompt_if_missing MEDIA_PUBLIC_URL "Media public URL" "https://media.example.com"
   prompt_if_missing OAUTH2_PROXY_PUBLIC_URL "OAuth2 Proxy public URL for protected admin dashboards" "https://oauth2.example.com"
@@ -205,6 +207,11 @@ write_env_file() {
   if [[ -z "${KEYCLOAK_DB_PASSWORD:-}" ]]; then
     KEYCLOAK_DB_PASSWORD="$(random_b64url 32)"
     echo "Generated KEYCLOAK_DB_PASSWORD."
+  fi
+
+  if [[ -z "${INITIAL_OWNER_PASSWORD:-}" ]]; then
+    INITIAL_OWNER_PASSWORD="$(random_b64url 24)"
+    echo "Generated INITIAL_OWNER_PASSWORD."
   fi
 
   umask 077
@@ -228,6 +235,9 @@ KEYCLOAK_REALM=$KEYCLOAK_REALM
 KEYCLOAK_DB_PASSWORD=$KEYCLOAK_DB_PASSWORD
 KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=$KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME
 KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=$KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
+INITIAL_OWNER_USERNAME=$INITIAL_OWNER_USERNAME
+INITIAL_OWNER_EMAIL=$INITIAL_OWNER_EMAIL
+INITIAL_OWNER_PASSWORD=$INITIAL_OWNER_PASSWORD
 
 APP_POLICY_NAME=$APP_POLICY_NAME
 APPROLE_NAME=$APPROLE_NAME
@@ -728,6 +738,43 @@ EOF
   printf '%s' "$id"
 }
 
+keycloak_user_id() {
+  local username="$1"
+  kcadm get users -r "$KEYCLOAK_REALM" -q "username=$username" --fields id --format csv | tail -n 1 | tr -d '"\r'
+}
+
+ensure_initial_owner_user() {
+  local username="${INITIAL_OWNER_USERNAME:?Missing INITIAL_OWNER_USERNAME}"
+  local email="${INITIAL_OWNER_EMAIL:?Missing INITIAL_OWNER_EMAIL}"
+  local password="${INITIAL_OWNER_PASSWORD:?Missing INITIAL_OWNER_PASSWORD}"
+  local user_id
+
+  user_id="$(keycloak_user_id "$username" || true)"
+
+  if [[ -z "$user_id" ]]; then
+    kcadm create users -r "$KEYCLOAK_REALM" \
+      -s "username=$username" \
+      -s "email=$email" \
+      -s enabled=true \
+      -s emailVerified=true >/dev/null
+  else
+    kcadm update "users/$user_id" -r "$KEYCLOAK_REALM" \
+      -s "email=$email" \
+      -s enabled=true \
+      -s emailVerified=true >/dev/null
+  fi
+
+  kcadm set-password -r "$KEYCLOAK_REALM" \
+    --username "$username" \
+    --new-password "$password" \
+    --temporary=false >/dev/null
+
+  kcadm add-roles -r "$KEYCLOAK_REALM" \
+    --uusername "$username" \
+    --cclientid website \
+    --rolename owner >/dev/null 2>&1 || true
+}
+
 bootstrap_keycloak() {
   echo "Bootstrapping Keycloak realm, clients, and roles..."
   kcadm config credentials \
@@ -750,6 +797,8 @@ bootstrap_keycloak() {
   for role in owner media_admin editor viewer infra_admin; do
     kcadm create "clients/$website_client_uuid/roles" -r "$KEYCLOAK_REALM" -s "name=$role" >/dev/null 2>&1 || true
   done
+
+  ensure_initial_owner_user
 
   for role in view-users query-users manage-users view-clients; do
     kcadm add-roles -r "$KEYCLOAK_REALM" \
@@ -823,6 +872,12 @@ print_approle() {
   echo "BAO_ADDR=https://$BAO_HOST"
   echo "OPENBAO_ROLE_ID=$role_id"
   echo "OPENBAO_SECRET_ID=$secret_id"
+  echo ""
+  echo "INITIAL WEBSITE OWNER LOGIN"
+  echo "KEYCLOAK_REALM=$KEYCLOAK_REALM"
+  echo "USERNAME=$INITIAL_OWNER_USERNAME"
+  echo "EMAIL=$INITIAL_OWNER_EMAIL"
+  echo "PASSWORD=$INITIAL_OWNER_PASSWORD"
 }
 
 main() {
