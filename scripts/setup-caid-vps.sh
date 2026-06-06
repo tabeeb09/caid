@@ -87,12 +87,14 @@ validate_plain_hostname() {
 detect_pkg_manager() {
   if command -v apt-get >/dev/null 2>&1; then
     echo apt
+  elif command -v apk >/dev/null 2>&1; then
+    echo apk
   elif command -v dnf >/dev/null 2>&1; then
     echo dnf
   elif command -v yum >/dev/null 2>&1; then
     echo yum
   else
-    echo "Unsupported Linux package manager. Install Docker, Docker Compose plugin, curl, git, openssl, and node manually." >&2
+    echo "Unsupported Linux package manager. Install Docker, Docker Compose plugin, curl, git, openssl, bash, and node manually." >&2
     exit 1
   fi
 }
@@ -115,6 +117,10 @@ install_missing_dependencies() {
       apt-get update
       apt-get install -y ca-certificates curl git openssl nodejs ufw
       ;;
+    apk)
+      apk update
+      apk add --no-cache bash ca-certificates curl docker docker-cli-compose git nodejs openssl openrc
+      ;;
     dnf)
       dnf install -y ca-certificates curl git openssl nodejs ufw ||
         dnf install -y ca-certificates curl git openssl nodejs
@@ -124,7 +130,7 @@ install_missing_dependencies() {
       ;;
   esac
 
-  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+  if [[ "$manager" != "apk" ]] && (! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1); then
     echo "Installing Docker Engine and Compose plugin from Docker's official installer..."
     curl -fsSL https://get.docker.com | sh
   fi
@@ -141,7 +147,19 @@ install_missing_dependencies() {
 }
 
 enable_docker() {
-  systemctl enable --now docker
+  if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+    systemctl enable --now docker
+    return
+  fi
+
+  if command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
+    rc-update add docker default >/dev/null 2>&1 || true
+    rc-service docker start
+    return
+  fi
+
+  echo "Could not detect systemd or OpenRC. Start Docker manually, then rerun." >&2
+  exit 1
 }
 
 write_env_file() {
@@ -310,7 +328,8 @@ configure_management_overlay() {
   esac
 }
 
-install_caid_systemd_service() {
+install_caid_service() {
+  if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
   cat >/etc/systemd/system/caid.service <<EOF
 [Unit]
 Description=CAId central authorization and identity stack
@@ -332,6 +351,35 @@ EOF
 
   systemctl daemon-reload
   systemctl enable caid.service
+    return
+  fi
+
+  if command -v rc-update >/dev/null 2>&1; then
+    cat >/etc/init.d/caid <<EOF
+#!/sbin/openrc-run
+description="CAId central authorization and identity stack"
+command="/usr/bin/docker"
+command_args="compose --env-file $ENV_FILE -f $CAID_HOME/docker-compose.yaml up -d"
+command_background="false"
+directory="$CAID_HOME"
+depend() {
+  need docker
+  after net
+}
+stop() {
+  ebegin "Stopping CAId central authorization and identity stack"
+  cd "$CAID_HOME" || return 1
+  /usr/bin/docker compose --env-file "$ENV_FILE" -f "$CAID_HOME/docker-compose.yaml" stop
+  eend \$?
+}
+EOF
+    chmod 755 /etc/init.d/caid
+    rc-update add caid default >/dev/null 2>&1 || true
+    return
+  fi
+
+  echo "Could not install startup service: neither systemd nor OpenRC was detected." >&2
+  exit 1
 }
 
 write_stack_files() {
@@ -765,7 +813,7 @@ write_kv() {
   local path="$1"
   local payload="$2"
   local encoded
-  encoded="$(printf '%s' "$payload" | base64 -w 0)"
+  encoded="$(printf '%s' "$payload" | base64 | tr -d '\n')"
   compose exec -T openbao sh -lc "printf '%s' '$encoded' | base64 -d > /tmp/payload.json && BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN='$BAO_BOOTSTRAP_TOKEN' bao write '$BAO_KV_MOUNT/data/$path' @/tmp/payload.json >/dev/null"
 }
 
@@ -777,7 +825,7 @@ seed_app_secrets() {
   auth_secret="$(openssl rand -base64 32)"
   s3_access="rustfs-$(random_b64url 18)"
   s3_secret="$(random_b64url 32)"
-  oauth_cookie="$(openssl rand -base64 32)"
+  oauth_cookie="$(openssl rand -hex 16)"
 
   website_payload="$(AUTH_SECRET_VALUE="$auth_secret" \
     WEBSITE_SECRET="$website_secret" \
@@ -834,7 +882,7 @@ main() {
   source "$ENV_FILE"
   configure_management_overlay
   write_stack_files
-  install_caid_systemd_service
+  install_caid_service
   configure_firewall
   pull_and_start_stack
   wait_for_openbao
