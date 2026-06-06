@@ -224,6 +224,41 @@ write_env_file() {
     echo "Generated INITIAL_OWNER_PASSWORD."
   fi
 
+  if [[ -z "${WEBSITE_AUTH_SECRET:-}" ]]; then
+    WEBSITE_AUTH_SECRET="$(openssl rand -base64 32)"
+    echo "Generated WEBSITE_AUTH_SECRET."
+  fi
+
+  if [[ -z "${WEBSITE_CLIENT_SECRET:-}" ]]; then
+    WEBSITE_CLIENT_SECRET="$(random_b64url 32)"
+    echo "Generated WEBSITE_CLIENT_SECRET."
+  fi
+
+  if [[ -z "${OAUTH2_PROXY_CLIENT_SECRET:-}" ]]; then
+    OAUTH2_PROXY_CLIENT_SECRET="$(random_b64url 32)"
+    echo "Generated OAUTH2_PROXY_CLIENT_SECRET."
+  fi
+
+  if [[ -z "${OAUTH2_PROXY_COOKIE_SECRET:-}" ]]; then
+    OAUTH2_PROXY_COOKIE_SECRET="$(openssl rand -hex 16)"
+    echo "Generated OAUTH2_PROXY_COOKIE_SECRET."
+  fi
+
+  if [[ -z "${WEBSITE_ADMIN_SYNC_CLIENT_SECRET:-}" ]]; then
+    WEBSITE_ADMIN_SYNC_CLIENT_SECRET="$(random_b64url 32)"
+    echo "Generated WEBSITE_ADMIN_SYNC_CLIENT_SECRET."
+  fi
+
+  if [[ -z "${RUSTFS_ACCESS_KEY_ID:-}" ]]; then
+    RUSTFS_ACCESS_KEY_ID="rustfs-$(random_b64url 18)"
+    echo "Generated RUSTFS_ACCESS_KEY_ID."
+  fi
+
+  if [[ -z "${RUSTFS_SECRET_ACCESS_KEY:-}" ]]; then
+    RUSTFS_SECRET_ACCESS_KEY="$(random_b64url 32)"
+    echo "Generated RUSTFS_SECRET_ACCESS_KEY."
+  fi
+
   umask 077
   cat >"$ENV_FILE" <<EOF
 AUTH_HOST=$AUTH_HOST
@@ -248,6 +283,13 @@ KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=$KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
 INITIAL_OWNER_USERNAME=$INITIAL_OWNER_USERNAME
 INITIAL_OWNER_EMAIL=$INITIAL_OWNER_EMAIL
 INITIAL_OWNER_PASSWORD=$INITIAL_OWNER_PASSWORD
+WEBSITE_AUTH_SECRET=$WEBSITE_AUTH_SECRET
+WEBSITE_CLIENT_SECRET=$WEBSITE_CLIENT_SECRET
+OAUTH2_PROXY_CLIENT_SECRET=$OAUTH2_PROXY_CLIENT_SECRET
+OAUTH2_PROXY_COOKIE_SECRET=$OAUTH2_PROXY_COOKIE_SECRET
+WEBSITE_ADMIN_SYNC_CLIENT_SECRET=$WEBSITE_ADMIN_SYNC_CLIENT_SECRET
+RUSTFS_ACCESS_KEY_ID=$RUSTFS_ACCESS_KEY_ID
+RUSTFS_SECRET_ACCESS_KEY=$RUSTFS_SECRET_ACCESS_KEY
 
 APP_POLICY_NAME=$APP_POLICY_NAME
 APPROLE_NAME=$APPROLE_NAME
@@ -802,9 +844,9 @@ bootstrap_keycloak() {
   kcadm create realms -s "realm=$KEYCLOAK_REALM" -s enabled=true >/dev/null 2>&1 || true
 
   local website_secret oauth_secret admin_secret website_client_uuid
-  website_secret="$(random_b64url 32)"
-  oauth_secret="$(random_b64url 32)"
-  admin_secret="$(random_b64url 32)"
+  website_secret="$WEBSITE_CLIENT_SECRET"
+  oauth_secret="$OAUTH2_PROXY_CLIENT_SECRET"
+  admin_secret="$WEBSITE_ADMIN_SYNC_CLIENT_SECRET"
 
   website_client_uuid="$(ensure_keycloak_client website "$website_secret" "$APP_PUBLIC_URL/api/auth/callback/keycloak" "$APP_PUBLIC_URL" false)"
   ensure_keycloak_client oauth2-proxy "$oauth_secret" "$OAUTH2_PROXY_PUBLIC_URL/oauth2/callback" "$OAUTH2_PROXY_PUBLIC_URL" false >/dev/null
@@ -839,10 +881,10 @@ seed_app_secrets() {
   local oauth_secret="$2"
   local admin_secret="$3"
   local auth_secret s3_access s3_secret oauth_cookie website_payload
-  auth_secret="$(openssl rand -base64 32)"
-  s3_access="rustfs-$(random_b64url 18)"
-  s3_secret="$(random_b64url 32)"
-  oauth_cookie="$(openssl rand -hex 16)"
+  auth_secret="$WEBSITE_AUTH_SECRET"
+  s3_access="$RUSTFS_ACCESS_KEY_ID"
+  s3_secret="$RUSTFS_SECRET_ACCESS_KEY"
+  oauth_cookie="$OAUTH2_PROXY_COOKIE_SECRET"
 
   website_payload="$(AUTH_SECRET_VALUE="$auth_secret" \
     WEBSITE_SECRET="$website_secret" \
