@@ -42,6 +42,16 @@ prompt_if_missing() {
     return
   fi
 
+  if [[ ! -t 0 && -n "$default" ]]; then
+    printf -v "$var_name" '%s' "$default"
+    return
+  fi
+
+  if [[ ! -t 0 ]]; then
+    echo "$var_name is required but no value was provided and stdin is not interactive." >&2
+    exit 1
+  fi
+
   if [[ "$secret" == "true" ]]; then
     read -r -s -p "$prompt" current
     echo
