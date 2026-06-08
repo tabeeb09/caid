@@ -208,6 +208,22 @@ write_env_file() {
   prompt_optional_if_unset GOOGLE_CLIENT_ID "Optional Google OAuth client ID; leave blank to skip" ""
   prompt_optional_if_unset GOOGLE_CLIENT_SECRET "Optional Google OAuth client secret; leave blank to skip" "" true
   prompt_optional_if_unset ALLOWED_EMAILS "Optional comma-separated allowed emails/domains; leave blank to skip" ""
+  prompt_optional_if_unset DNS_PROVIDER "Optional DNS provider for automated records; none or cloudflare" "none"
+  DNS_PROVIDER="$(printf '%s' "${DNS_PROVIDER:-none}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$DNS_PROVIDER" == "cloudflare" ]]; then
+    prompt_if_missing CLOUDFLARE_ZONE_NAME "Cloudflare zone name" "$AUTH_HOST"
+    prompt_optional_if_unset CLOUDFLARE_ZONE_ID "Optional Cloudflare zone ID; leave blank if external automation resolved it" ""
+    prompt_if_missing CLOUDFLARE_API_TOKEN "Cloudflare API token with Zone:DNS:Edit" "" true
+    CLOUDFLARE_PROXIED="${CLOUDFLARE_PROXIED:-false}"
+    CLOUDFLARE_TTL="${CLOUDFLARE_TTL:-120}"
+  else
+    DNS_PROVIDER="none"
+    CLOUDFLARE_ZONE_NAME="${CLOUDFLARE_ZONE_NAME:-}"
+    CLOUDFLARE_ZONE_ID="${CLOUDFLARE_ZONE_ID:-}"
+    CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
+    CLOUDFLARE_PROXIED="${CLOUDFLARE_PROXIED:-false}"
+    CLOUDFLARE_TTL="${CLOUDFLARE_TTL:-120}"
+  fi
 
   if [[ -z "${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}" ]]; then
     KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="$(random_b64url 24)"
@@ -301,6 +317,12 @@ RUSTFS_BUCKET=$RUSTFS_BUCKET
 GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
 GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
 ALLOWED_EMAILS=${ALLOWED_EMAILS:-}
+DNS_PROVIDER=$DNS_PROVIDER
+CLOUDFLARE_ZONE_NAME=$CLOUDFLARE_ZONE_NAME
+CLOUDFLARE_ZONE_ID=$CLOUDFLARE_ZONE_ID
+CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN
+CLOUDFLARE_PROXIED=$CLOUDFLARE_PROXIED
+CLOUDFLARE_TTL=$CLOUDFLARE_TTL
 
 OPENBAO_IMAGE=$OPENBAO_IMAGE
 KEYCLOAK_IMAGE=$KEYCLOAK_IMAGE
@@ -918,6 +940,16 @@ process.stdout.write(JSON.stringify({ data }));
   write_kv rustfs/prod "{\"data\":{\"NEXT_PUBLIC_MEDIA_BASE_URL\":\"$MEDIA_PUBLIC_URL\",\"S3_ENDPOINT\":\"http://rustfs:9000\",\"S3_PUBLIC_ENDPOINT\":\"$MEDIA_PUBLIC_URL\",\"S3_BUCKET\":\"$RUSTFS_BUCKET\",\"S3_REGION\":\"us-east-1\",\"S3_ACCESS_KEY_ID\":\"$s3_access\",\"S3_SECRET_ACCESS_KEY\":\"$s3_secret\"}}"
   write_kv oauth2-proxy/prod "{\"data\":{\"OAUTH2_PROXY_CLIENT_ID\":\"oauth2-proxy\",\"OAUTH2_PROXY_CLIENT_SECRET\":\"$oauth_secret\",\"OAUTH2_PROXY_COOKIE_SECRET\":\"$oauth_cookie\",\"OAUTH2_PROXY_REDIRECT_URL\":\"$OAUTH2_PROXY_PUBLIC_URL/oauth2/callback\"}}"
   write_kv keycloak/prod "{\"data\":{\"KEYCLOAK_ADMIN_REALM\":\"$KEYCLOAK_REALM\",\"KEYCLOAK_ADMIN_CLIENT_ID\":\"website-admin-sync\",\"KEYCLOAK_ADMIN_CLIENT_SECRET\":\"$admin_secret\"}}"
+  if [[ "${DNS_PROVIDER:-none}" == "cloudflare" && -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    DNS_PROVIDER_VALUE="$DNS_PROVIDER" \
+      CLOUDFLARE_ZONE_NAME_VALUE="$CLOUDFLARE_ZONE_NAME" \
+      CLOUDFLARE_ZONE_ID_VALUE="${CLOUDFLARE_ZONE_ID:-}" \
+      CLOUDFLARE_API_TOKEN_VALUE="$CLOUDFLARE_API_TOKEN" \
+      CLOUDFLARE_PROXIED_VALUE="${CLOUDFLARE_PROXIED:-false}" \
+      CLOUDFLARE_TTL_VALUE="${CLOUDFLARE_TTL:-120}" \
+      node -e "process.stdout.write(JSON.stringify({data:{DNS_PROVIDER:process.env.DNS_PROVIDER_VALUE,CLOUDFLARE_ZONE_NAME:process.env.CLOUDFLARE_ZONE_NAME_VALUE,CLOUDFLARE_ZONE_ID:process.env.CLOUDFLARE_ZONE_ID_VALUE,CLOUDFLARE_API_TOKEN:process.env.CLOUDFLARE_API_TOKEN_VALUE,CLOUDFLARE_PROXIED:process.env.CLOUDFLARE_PROXIED_VALUE,CLOUDFLARE_TTL:process.env.CLOUDFLARE_TTL_VALUE}}))" \
+      | { read -r cloudflare_payload; write_kv cloudflare/prod "$cloudflare_payload"; }
+  fi
 }
 
 print_approle() {

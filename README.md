@@ -47,6 +47,10 @@ RUSTFS_BUCKET
 GOOGLE_CLIENT_ID, optional
 GOOGLE_CLIENT_SECRET, optional
 ALLOWED_EMAILS, optional
+DNS_PROVIDER, optional
+CLOUDFLARE_ZONE_NAME, if DNS_PROVIDER=cloudflare
+CLOUDFLARE_ZONE_ID, optional if DNS_PROVIDER=cloudflare
+CLOUDFLARE_API_TOKEN, if DNS_PROVIDER=cloudflare
 ```
 
 `AUTH_HOST` and `BAO_HOST` must be plain hostnames, not URLs and not `host:port` values.
@@ -105,6 +109,14 @@ kv/data/website/prod
 kv/data/rustfs/prod
 kv/data/oauth2-proxy/prod
 kv/data/keycloak/prod
+kv/data/cloudflare/prod, only when DNS_PROVIDER=cloudflare
+```
+
+The Cloudflare token should be scoped to the relevant zone and only needs:
+
+```text
+Zone:DNS:Edit
+Zone:Zone:Read
 ```
 
 ## Important Recovery Output
