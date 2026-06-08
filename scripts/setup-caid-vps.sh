@@ -768,7 +768,7 @@ bootstrap_openbao() {
 }
 
 kcadm() {
-  compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"
+  compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@" </dev/null
 }
 
 keycloak_client_id() {
