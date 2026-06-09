@@ -864,6 +864,12 @@ bootstrap_keycloak() {
     --password "$KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null
 
   kcadm create realms -s "realm=$KEYCLOAK_REALM" -s enabled=true >/dev/null 2>&1 || true
+  kcadm update "realms/$KEYCLOAK_REALM" \
+    -s registrationAllowed=true \
+    -s registrationEmailAsUsername=true \
+    -s loginWithEmailAllowed=true \
+    -s duplicateEmailsAllowed=false \
+    -s verifyEmail=false >/dev/null
 
   local website_secret oauth_secret admin_secret website_client_uuid
   website_secret="$WEBSITE_CLIENT_SECRET"
