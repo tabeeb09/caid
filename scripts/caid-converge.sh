@@ -76,7 +76,16 @@ main() {
   cd "$CAID_HOME"
   token="$(root_token)"
   ensure_runtime_policy "$token"
-  BAO_ADDR="${BAO_LOCAL_ADDR:-http://127.0.0.1:8200}" \
+  converge_bao_addr="${BAO_CONVERGE_ADDR:-}"
+  if [[ -z "$converge_bao_addr" ]]; then
+    if [[ -n "${BAO_HOST:-}" ]]; then
+      converge_bao_addr="https://$BAO_HOST"
+    else
+      converge_bao_addr="http://127.0.0.1:8200"
+    fi
+  fi
+
+  BAO_ADDR="$converge_bao_addr" \
     BAO_TOKEN="$token" \
     BAO_KV_MOUNT="${BAO_KV_MOUNT:-kv}" \
     node scripts/caid-converge.mjs --mode "$MODE"
