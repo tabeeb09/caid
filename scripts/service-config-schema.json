@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "services": [
+    {
+      "service": "netbird",
+      "title": "NetBird ZTNA",
+      "description": "Self-hosted ZTNA control plane for private admin access.",
+      "enabledByDefault": false,
+      "openbaoPath": "caid/config-values/netbird",
+      "requiredValues": [
+        {
+          "key": "NETBIRD_HOST",
+          "label": "NetBird public hostname",
+          "description": "Public hostname for the NetBird control plane, for example ztna.loftrop.com.",
+          "secret": false,
+          "required": true,
+          "placeholder": "ztna.example.com"
+        },
+        {
+          "key": "NETBIRD_OIDC_CLIENT_SECRET",
+          "label": "NetBird Keycloak OIDC client secret",
+          "description": "Client secret for the Keycloak OIDC client used by NetBird.",
+          "secret": true,
+          "required": true,
+          "placeholder": ""
+        }
+      ]
+    },
+    {
+      "service": "logging",
+      "title": "Logging Admin Plane",
+      "description": "Grafana/Loki logging panel and log ingestion config.",
+      "enabledByDefault": false,
+      "openbaoPath": "caid/config-values/logging",
+      "requiredValues": [
+        {
+          "key": "GRAFANA_HOST",
+          "label": "Grafana private admin hostname",
+          "description": "ZTNA/private hostname for the Grafana logging UI, for example logs.admin.loftrop.com.",
+          "secret": false,
+          "required": true,
+          "placeholder": "logs.admin.example.com"
+        },
+        {
+          "key": "GRAFANA_ADMIN_PASSWORD",
+          "label": "Initial Grafana admin password",
+          "description": "Generated or human-provided password used only during first Grafana bootstrap.",
+          "secret": true,
+          "required": true,
+          "placeholder": ""
+        }
+      ]
+    }
+  ]
+}

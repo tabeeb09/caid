@@ -1,0 +1,28 @@
+name: CAId Converge VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: caid-converge-vps
+  cancel-in-progress: false
+
+jobs:
+  converge:
+    runs-on: ${{ fromJSON(vars.CAID_RUNNER_LABELS || '["self-hosted","linux","website-deploy","private-network"]') }}
+    steps:
+      - name: Update CAId repo and converge
+        shell: bash
+        run: |
+          cd /srv/caid
+          sudo git config --global --add safe.directory /srv/caid
+          sudo git fetch --all --tags --prune
+          sudo git checkout main
+          sudo git reset --hard origin/main
+          sudo bash scripts/caid-converge.sh --mode noninteractive

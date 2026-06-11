@@ -545,6 +545,14 @@ path "kv/data/oauth2-proxy/prod" {
 path "kv/data/keycloak/prod" {
   capabilities = ["read"]
 }
+
+path "kv/data/caid/config-requests" {
+  capabilities = ["read", "update"]
+}
+
+path "kv/data/caid/config-values/*" {
+  capabilities = ["read", "update"]
+}
 EOF
 
   cat >"$CAID_HOME/openbao/policies/admin-bootstrap.hcl" <<'EOF'
@@ -880,7 +888,7 @@ bootstrap_keycloak() {
   ensure_keycloak_client oauth2-proxy "$oauth_secret" "$OAUTH2_PROXY_PUBLIC_URL/oauth2/callback" "$OAUTH2_PROXY_PUBLIC_URL" false >/dev/null
   ensure_keycloak_client website-admin-sync "$admin_secret" "$APP_PUBLIC_URL/*" "$APP_PUBLIC_URL" true >/dev/null
 
-  for role in owner media_admin editor viewer infra_admin; do
+  for role in owner media_admin editor viewer infra_admin identity_hr_manager config_admin audit_admin; do
     kcadm create "clients/$website_client_uuid/roles" -r "$KEYCLOAK_REALM" -s "name=$role" >/dev/null 2>&1 || true
   done
 
