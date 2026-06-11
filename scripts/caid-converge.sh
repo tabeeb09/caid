@@ -48,7 +48,17 @@ compose() {
 }
 
 ensure_runtime_policy() {
-  if [[ ! -f "$CAID_HOME/openbao/policies/website-runtime.hcl" ]]; then
+  local source_policy="$CAID_HOME/scripts/policies/website-runtime.hcl"
+  local target_policy="$CAID_HOME/openbao/policies/website-runtime.hcl"
+
+  if [[ ! -f "$source_policy" ]]; then
+    echo "Missing source website runtime policy file: $source_policy" >&2
+    exit 1
+  fi
+
+  install -m 0644 "$source_policy" "$target_policy"
+
+  if [[ ! -f "$target_policy" ]]; then
     echo "Missing website runtime policy file." >&2
     exit 1
   fi
