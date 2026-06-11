@@ -43,13 +43,31 @@ root_token() {
   node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(data.root_token)" "$RECOVERY_FILE"
 }
 
+compose() {
+  docker compose --env-file "$ENV_FILE" -f "$CAID_HOME/docker-compose.yaml" "$@"
+}
+
+ensure_runtime_policy() {
+  if [[ ! -f "$CAID_HOME/openbao/policies/website-runtime.hcl" ]]; then
+    echo "Missing website runtime policy file." >&2
+    exit 1
+  fi
+
+  compose exec -T openbao env \
+    BAO_ADDR=http://127.0.0.1:8200 \
+    BAO_TOKEN="$1" \
+    bao policy write "${APP_POLICY_NAME:-website-runtime}" /openbao/policies/website-runtime.hcl >/dev/null
+}
+
 main() {
   require_root
   load_env
 
   cd "$CAID_HOME"
+  token="$(root_token)"
+  ensure_runtime_policy "$token"
   BAO_ADDR="${BAO_LOCAL_ADDR:-http://127.0.0.1:8200}" \
-    BAO_TOKEN="$(root_token)" \
+    BAO_TOKEN="$token" \
     BAO_KV_MOUNT="${BAO_KV_MOUNT:-kv}" \
     node scripts/caid-converge.mjs --mode "$MODE"
 }
