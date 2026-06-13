@@ -205,6 +205,8 @@ write_env_file() {
   prompt_if_missing MEDIA_PUBLIC_URL "Media public URL" "https://media.example.com"
   prompt_if_missing OAUTH2_PROXY_PUBLIC_URL "OAuth2 Proxy public URL for protected admin dashboards" "https://oauth2.example.com"
   prompt_if_missing RUSTFS_BUCKET "RustFS/S3 media bucket name" "public-media"
+  prompt_optional_if_unset NETBIRD_HOST "Optional NetBird/ZTNA hostname; leave blank to publish a config request" ""
+  prompt_optional_if_unset GRAFANA_HOST "Optional Grafana logging hostname; leave blank to publish a config request" ""
   prompt_optional_if_unset GOOGLE_CLIENT_ID "Optional Google OAuth client ID; leave blank to skip" ""
   prompt_optional_if_unset GOOGLE_CLIENT_SECRET "Optional Google OAuth client secret; leave blank to skip" "" true
   prompt_optional_if_unset ALLOWED_EMAILS "Optional comma-separated allowed emails/domains; leave blank to skip" ""
@@ -265,6 +267,21 @@ write_env_file() {
     echo "Generated WEBSITE_ADMIN_SYNC_CLIENT_SECRET."
   fi
 
+  if [[ -z "${OPENBAO_OIDC_CLIENT_SECRET:-}" ]]; then
+    OPENBAO_OIDC_CLIENT_SECRET="$(random_b64url 32)"
+    echo "Generated OPENBAO_OIDC_CLIENT_SECRET."
+  fi
+
+  if [[ -z "${NETBIRD_OIDC_CLIENT_SECRET:-}" ]]; then
+    NETBIRD_OIDC_CLIENT_SECRET="$(random_b64url 32)"
+    echo "Generated NETBIRD_OIDC_CLIENT_SECRET."
+  fi
+
+  if [[ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
+    GRAFANA_ADMIN_PASSWORD="$(random_b64url 24)"
+    echo "Generated GRAFANA_ADMIN_PASSWORD."
+  fi
+
   if [[ -z "${RUSTFS_ACCESS_KEY_ID:-}" ]]; then
     RUSTFS_ACCESS_KEY_ID="rustfs-$(random_b64url 18)"
     echo "Generated RUSTFS_ACCESS_KEY_ID."
@@ -285,6 +302,8 @@ TAILSCALE_HOSTNAME=${TAILSCALE_HOSTNAME:-}
 TAILSCALE_AUTH_KEY=${TAILSCALE_AUTH_KEY:-}
 NETBIRD_SETUP_KEY=${NETBIRD_SETUP_KEY:-}
 NETBIRD_MANAGEMENT_URL=${NETBIRD_MANAGEMENT_URL:-}
+NETBIRD_HOST=${NETBIRD_HOST:-}
+GRAFANA_HOST=${GRAFANA_HOST:-}
 
 BAO_PORT=8200
 BAO_ADDR=http://openbao:8200
@@ -304,6 +323,9 @@ WEBSITE_CLIENT_SECRET=$WEBSITE_CLIENT_SECRET
 OAUTH2_PROXY_CLIENT_SECRET=$OAUTH2_PROXY_CLIENT_SECRET
 OAUTH2_PROXY_COOKIE_SECRET=$OAUTH2_PROXY_COOKIE_SECRET
 WEBSITE_ADMIN_SYNC_CLIENT_SECRET=$WEBSITE_ADMIN_SYNC_CLIENT_SECRET
+OPENBAO_OIDC_CLIENT_SECRET=$OPENBAO_OIDC_CLIENT_SECRET
+NETBIRD_OIDC_CLIENT_SECRET=$NETBIRD_OIDC_CLIENT_SECRET
+GRAFANA_ADMIN_PASSWORD=$GRAFANA_ADMIN_PASSWORD
 RUSTFS_ACCESS_KEY_ID=$RUSTFS_ACCESS_KEY_ID
 RUSTFS_SECRET_ACCESS_KEY=$RUSTFS_SECRET_ACCESS_KEY
 
@@ -561,6 +583,12 @@ path "*" {
 }
 EOF
 
+  cat >"$CAID_HOME/openbao/policies/openbao-admin.hcl" <<'EOF'
+path "*" {
+  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+}
+EOF
+
   cat >"$CAID_HOME/caddy/Caddyfile" <<'EOF'
 {$BAO_HOST} {
   reverse_proxy openbao:8200
@@ -579,7 +607,8 @@ EOF
     "$CAID_HOME/caddy/Caddyfile" \
     "$CAID_HOME/openbao/config/openbao.hcl" \
     "$CAID_HOME/openbao/policies/website-runtime.hcl" \
-    "$CAID_HOME/openbao/policies/admin-bootstrap.hcl"
+    "$CAID_HOME/openbao/policies/admin-bootstrap.hcl" \
+    "$CAID_HOME/openbao/policies/openbao-admin.hcl"
 }
 
 configure_firewall() {
@@ -614,6 +643,7 @@ validate_stack_files() {
     "$CAID_HOME/openbao/config/openbao.hcl"
     "$CAID_HOME/openbao/policies/website-runtime.hcl"
     "$CAID_HOME/openbao/policies/admin-bootstrap.hcl"
+    "$CAID_HOME/openbao/policies/openbao-admin.hcl"
     "$CAID_HOME/caddy/Caddyfile"
   )
 
@@ -767,6 +797,7 @@ bootstrap_openbao() {
   bao env BAO_TOKEN="$BAO_BOOTSTRAP_TOKEN" bao secrets enable -path="$BAO_KV_MOUNT" -version=2 kv >/dev/null 2>&1 || true
   bao env BAO_TOKEN="$BAO_BOOTSTRAP_TOKEN" bao auth enable approle >/dev/null 2>&1 || true
   bao env BAO_TOKEN="$BAO_BOOTSTRAP_TOKEN" bao policy write admin-bootstrap /openbao/policies/admin-bootstrap.hcl
+  bao env BAO_TOKEN="$BAO_BOOTSTRAP_TOKEN" bao policy write openbao-admin /openbao/policies/openbao-admin.hcl
   bao env BAO_TOKEN="$BAO_BOOTSTRAP_TOKEN" bao policy write "$APP_POLICY_NAME" /openbao/policies/website-runtime.hcl
   bao env BAO_TOKEN="$BAO_BOOTSTRAP_TOKEN" bao write "auth/approle/role/$APPROLE_NAME" \
     "token_policies=$APP_POLICY_NAME" \
@@ -825,6 +856,57 @@ keycloak_user_id() {
   kcadm get users -r "$KEYCLOAK_REALM" -q "username=$username" --fields id --format csv | tail -n 1 | tr -d '"\r'
 }
 
+keycloak_group_id() {
+  local group_name="$1"
+  kcadm get groups -r "$KEYCLOAK_REALM" -q "search=$group_name" --fields id,name --format csv |
+    awk -F, -v name="\"$group_name\"" '$2 == name { gsub(/"/, "", $1); print $1; exit }'
+}
+
+ensure_keycloak_group() {
+  local group_name="$1"
+  local group_id
+
+  group_id="$(keycloak_group_id "$group_name" || true)"
+  if [[ -z "$group_id" ]]; then
+    kcadm create groups -r "$KEYCLOAK_REALM" -s "name=$group_name" >/dev/null
+    group_id="$(keycloak_group_id "$group_name")"
+  fi
+
+  printf '%s' "$group_id"
+}
+
+ensure_user_group() {
+  local user_id="$1"
+  local group_name="$2"
+  local group_id
+
+  group_id="$(ensure_keycloak_group "$group_name")"
+  kcadm update "users/$user_id/groups/$group_id" -r "$KEYCLOAK_REALM" -n >/dev/null 2>&1 || true
+}
+
+ensure_groups_mapper() {
+  local client_uuid="$1"
+  local mapper_name="${2:-groups}"
+  local existing
+
+  existing="$(kcadm get "clients/$client_uuid/protocol-mappers/models" -r "$KEYCLOAK_REALM" --fields id,name --format csv |
+    awk -F, -v name="\"$mapper_name\"" '$2 == name { gsub(/"/, "", $1); print $1; exit }' || true)"
+
+  if [[ -n "$existing" ]]; then
+    return
+  fi
+
+  kcadm create "clients/$client_uuid/protocol-mappers/models" -r "$KEYCLOAK_REALM" \
+    -s "name=$mapper_name" \
+    -s "protocol=openid-connect" \
+    -s "protocolMapper=oidc-group-membership-mapper" \
+    -s 'config."claim.name"=groups' \
+    -s 'config."full.path"=false' \
+    -s 'config."id.token.claim"=true' \
+    -s 'config."access.token.claim"=true' \
+    -s 'config."userinfo.token.claim"=true' >/dev/null
+}
+
 ensure_initial_owner_user() {
   local username="${INITIAL_OWNER_USERNAME:?Missing INITIAL_OWNER_USERNAME}"
   local email="${INITIAL_OWNER_EMAIL:?Missing INITIAL_OWNER_EMAIL}"
@@ -861,6 +943,11 @@ ensure_initial_owner_user() {
     --uusername "$username" \
     --cclientid website \
     --rolename owner >/dev/null 2>&1 || true
+
+  user_id="$(keycloak_user_id "$username")"
+  for group in owner openbao_admin rustfs_admin netbird_admin logging_admin identity_hr_manager config_admin audit_admin; do
+    ensure_user_group "$user_id" "$group"
+  done
 }
 
 bootstrap_keycloak() {
@@ -878,8 +965,11 @@ bootstrap_keycloak() {
     -s loginWithEmailAllowed=true \
     -s duplicateEmailsAllowed=false \
     -s verifyEmail=false >/dev/null
+  kcadm update "authentication/required-actions/CONFIGURE_TOTP" -r "$KEYCLOAK_REALM" \
+    -s enabled=true \
+    -s defaultAction=true >/dev/null 2>&1 || true
 
-  local website_secret oauth_secret admin_secret website_client_uuid
+  local website_secret oauth_secret admin_secret website_client_uuid openbao_client_uuid netbird_client_uuid
   website_secret="$WEBSITE_CLIENT_SECRET"
   oauth_secret="$OAUTH2_PROXY_CLIENT_SECRET"
   admin_secret="$WEBSITE_ADMIN_SYNC_CLIENT_SECRET"
@@ -887,10 +977,16 @@ bootstrap_keycloak() {
   website_client_uuid="$(ensure_keycloak_client website "$website_secret" "$APP_PUBLIC_URL/api/auth/callback/keycloak" "$APP_PUBLIC_URL" false)"
   ensure_keycloak_client oauth2-proxy "$oauth_secret" "$OAUTH2_PROXY_PUBLIC_URL/oauth2/callback" "$OAUTH2_PROXY_PUBLIC_URL" false >/dev/null
   ensure_keycloak_client website-admin-sync "$admin_secret" "$APP_PUBLIC_URL/*" "$APP_PUBLIC_URL" true >/dev/null
+  openbao_client_uuid="$(ensure_keycloak_client openbao "$OPENBAO_OIDC_CLIENT_SECRET" "https://$BAO_HOST/ui/vault/auth/oidc/oidc/callback" "https://$BAO_HOST" false)"
+  netbird_client_uuid="$(ensure_keycloak_client netbird "$NETBIRD_OIDC_CLIENT_SECRET" "${NETBIRD_PUBLIC_URL:-https://${NETBIRD_HOST:-netbird.localhost}}/*" "${NETBIRD_PUBLIC_URL:-https://${NETBIRD_HOST:-netbird.localhost}}" false)"
 
-  for role in owner media_admin editor viewer infra_admin identity_hr_manager config_admin audit_admin; do
+  for role in owner media_admin editor viewer infra_admin identity_hr_manager config_admin audit_admin logging_admin openbao_admin rustfs_admin netbird_admin; do
     kcadm create "clients/$website_client_uuid/roles" -r "$KEYCLOAK_REALM" -s "name=$role" >/dev/null 2>&1 || true
+    ensure_keycloak_group "$role" >/dev/null
   done
+  ensure_groups_mapper "$website_client_uuid"
+  ensure_groups_mapper "$openbao_client_uuid"
+  ensure_groups_mapper "$netbird_client_uuid"
 
   ensure_initial_owner_user
 
@@ -954,6 +1050,8 @@ process.stdout.write(JSON.stringify({ data }));
   write_kv rustfs/prod "{\"data\":{\"NEXT_PUBLIC_MEDIA_BASE_URL\":\"$MEDIA_PUBLIC_URL\",\"S3_ENDPOINT\":\"http://rustfs:9000\",\"S3_PUBLIC_ENDPOINT\":\"$MEDIA_PUBLIC_URL\",\"S3_BUCKET\":\"$RUSTFS_BUCKET\",\"S3_REGION\":\"us-east-1\",\"S3_ACCESS_KEY_ID\":\"$s3_access\",\"S3_SECRET_ACCESS_KEY\":\"$s3_secret\"}}"
   write_kv oauth2-proxy/prod "{\"data\":{\"OAUTH2_PROXY_CLIENT_ID\":\"oauth2-proxy\",\"OAUTH2_PROXY_CLIENT_SECRET\":\"$oauth_secret\",\"OAUTH2_PROXY_COOKIE_SECRET\":\"$oauth_cookie\",\"OAUTH2_PROXY_REDIRECT_URL\":\"$OAUTH2_PROXY_PUBLIC_URL/oauth2/callback\"}}"
   write_kv keycloak/prod "{\"data\":{\"KEYCLOAK_ADMIN_REALM\":\"$KEYCLOAK_REALM\",\"KEYCLOAK_ADMIN_CLIENT_ID\":\"website-admin-sync\",\"KEYCLOAK_ADMIN_CLIENT_SECRET\":\"$admin_secret\"}}"
+  write_kv caid/config-values/netbird "{\"data\":{\"NETBIRD_HOST\":\"${NETBIRD_HOST:-}\",\"NETBIRD_OIDC_CLIENT_SECRET\":\"$NETBIRD_OIDC_CLIENT_SECRET\"}}"
+  write_kv caid/config-values/logging "{\"data\":{\"GRAFANA_HOST\":\"${GRAFANA_HOST:-}\",\"GRAFANA_ADMIN_PASSWORD\":\"$GRAFANA_ADMIN_PASSWORD\"}}"
   if [[ "${DNS_PROVIDER:-none}" == "cloudflare" && -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
     local cloudflare_payload
     cloudflare_payload="$(DNS_PROVIDER_VALUE="$DNS_PROVIDER" \
@@ -965,6 +1063,37 @@ process.stdout.write(JSON.stringify({ data }));
       node -e "process.stdout.write(JSON.stringify({data:{DNS_PROVIDER:process.env.DNS_PROVIDER_VALUE,CLOUDFLARE_ZONE_NAME:process.env.CLOUDFLARE_ZONE_NAME_VALUE,CLOUDFLARE_ZONE_ID:process.env.CLOUDFLARE_ZONE_ID_VALUE,CLOUDFLARE_API_TOKEN:process.env.CLOUDFLARE_API_TOKEN_VALUE,CLOUDFLARE_PROXIED:process.env.CLOUDFLARE_PROXIED_VALUE,CLOUDFLARE_TTL:process.env.CLOUDFLARE_TTL_VALUE}}))")"
     write_kv cloudflare/prod "$cloudflare_payload"
   fi
+}
+
+configure_openbao_oidc() {
+  echo "Configuring OpenBao OIDC login through Keycloak..."
+  local role_payload
+  role_payload="$(BAO_HOST_VALUE="$BAO_HOST" node -e "
+const host = process.env.BAO_HOST_VALUE;
+process.stdout.write(JSON.stringify({
+  user_claim: 'email',
+  groups_claim: 'groups',
+  allowed_redirect_uris: [
+    'https://' + host + '/ui/vault/auth/oidc/oidc/callback',
+    'http://localhost:8250/oidc/callback'
+  ],
+  bound_claims: {
+    groups: 'openbao_admin'
+  },
+  policies: ['openbao-admin'],
+  ttl: '1h'
+}));
+")"
+
+  bao env BAO_TOKEN="$BAO_BOOTSTRAP_TOKEN" bao auth enable oidc >/dev/null 2>&1 || true
+  bao env BAO_TOKEN="$BAO_BOOTSTRAP_TOKEN" bao write auth/oidc/config \
+    oidc_discovery_url="https://$AUTH_HOST/realms/$KEYCLOAK_REALM" \
+    oidc_client_id="openbao" \
+    oidc_client_secret="$OPENBAO_OIDC_CLIENT_SECRET" \
+    default_role="openbao-admin" >/dev/null
+  local encoded
+  encoded="$(printf '%s' "$role_payload" | base64 | tr -d '\n')"
+  compose exec -T openbao sh -lc "printf '%s' '$encoded' | base64 -d > /tmp/openbao-oidc-role.json && BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN='$BAO_BOOTSTRAP_TOKEN' bao write auth/oidc/role/openbao-admin @/tmp/openbao-oidc-role.json >/dev/null"
 }
 
 print_approle() {
@@ -1002,6 +1131,7 @@ main() {
   bootstrap_openbao
   wait_for_keycloak
   bootstrap_keycloak
+  configure_openbao_oidc
   print_approle
 
   echo ""

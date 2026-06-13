@@ -69,6 +69,25 @@ ensure_runtime_policy() {
     bao policy write "${APP_POLICY_NAME:-website-runtime}" /openbao/policies/website-runtime.hcl >/dev/null
 }
 
+ensure_openbao_admin_policy() {
+  local token="$1"
+  local target_policy="$CAID_HOME/openbao/policies/openbao-admin.hcl"
+
+  if [[ ! -f "$target_policy" ]]; then
+    cat >"$target_policy" <<'EOF'
+path "*" {
+  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+}
+EOF
+    chmod 0644 "$target_policy"
+  fi
+
+  compose exec -T openbao env \
+    BAO_ADDR=http://127.0.0.1:8200 \
+    BAO_TOKEN="$token" \
+    bao policy write openbao-admin /openbao/policies/openbao-admin.hcl >/dev/null
+}
+
 main() {
   require_root
   load_env
@@ -76,6 +95,7 @@ main() {
   cd "$CAID_HOME"
   token="$(root_token)"
   ensure_runtime_policy "$token"
+  ensure_openbao_admin_policy "$token"
   converge_bao_addr="${BAO_CONVERGE_ADDR:-}"
   if [[ -z "$converge_bao_addr" ]]; then
     if [[ -n "${BAO_HOST:-}" ]]; then
