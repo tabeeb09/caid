@@ -11,6 +11,55 @@ This repo is intentionally small. A blank web-connected VPS should be able to cl
 
 The script does not assume Docker is already installed. It installs missing host dependencies, writes the required stack files, pulls public container images, starts the stack, initializes and unseals OpenBao, bootstraps OpenBao policies/AppRole, bootstraps Keycloak clients/roles, and prints the AppRole credentials needed by an app VPS.
 
+## Platform layout
+
+```mermaid
+graph LR
+  subgraph "External"
+    user["User (browser)"]
+    gh["GitHub Actions"]
+    cf["Cloudflare DNS"]
+  end
+  subgraph "Cloud Infrastructure"
+    caddy["Caddy Proxy<br/>(TLS on 443)"]
+    next["Next.js app (Docker)"]
+    oauth2["OAuth2 Proxy (admin)"]
+    keycloak["Keycloak (OIDC server)"]
+    pg["PostgreSQL (Keycloak DB)"]
+    openbao["OpenBao (Secret store)"]
+    rustfs["RustFS (S3 media storage)"]
+  end
+  subgraph "CI/CD & Provisioning"
+    ghcr["GH Container Registry"]
+    runner["Self-hosted Runner"]
+    compose["Docker Compose"]
+    terraform["Terraform<br/>(Hetzner + cloud-init)"]
+    vps["Hetzner VPS"]
+  end
+  user -->|DNS lookup| cf
+  cf -->|resolves to| caddy
+  user -->|HTTPS| caddy
+  caddy --> next
+  caddy --> oauth2
+  oauth2 --> openbao
+  oauth2 --> keycloak
+  keycloak --> pg
+  next --> rustfs
+  gh --> ghcr
+  gh --> runner
+  runner --> ghcr
+  runner --> compose
+  compose --> next
+  compose --> keycloak
+  compose --> openbao
+  compose --> rustfs
+  compose --> oauth2
+  vps --> caddy
+  terraform --> vps
+  vps --> runner
+  vps --> compose
+```
+
 ## Blank VPS Quick Start
 
 Minimal curl-based install:
@@ -30,6 +79,14 @@ sudo apt-get install -y git
 git clone https://github.com/tabeeb09/caid.git
 cd caid
 sudo bash scripts/setup-caid-vps.sh
+```
+
+If you already have the repo checked out and want to rerun convergence or bootstrap logic:
+
+```bash
+cd /srv/caid
+sudo bash scripts/setup-caid-vps.sh
+sudo bash scripts/caid-converge.sh --mode noninteractive
 ```
 
 The script prompts for:
@@ -164,6 +221,7 @@ Useful commands:
 sudo systemctl status caid
 sudo systemctl restart caid
 sudo systemctl stop caid
+sudo journalctl -u caid -f
 ```
 
 The service runs:
@@ -176,7 +234,7 @@ from `/srv/caid`, so OpenBao, Keycloak, Caddy, and Postgres come back after VPS 
 
 OpenBao itself intentionally comes back sealed after an OpenBao process restart unless you configure a separate auto-unseal mechanism. The setup script can unseal it again using `/etc/caid/openbao-init.json`, or you can unseal manually through OpenBao using the saved unseal key. Keep the recovery file offline-backed-up and root-only.
 
-## OpenBao UI
+## Admin access
 
 OpenBao is available at:
 
@@ -191,6 +249,14 @@ Use the root token from:
 ```
 
 for first setup or emergency recovery. For normal operation, create narrower admin policies/tokens in OpenBao.
+
+Keycloak is available at:
+
+```text
+https://<AUTH_HOST>
+```
+
+Log in with the bootstrap admin username you provided to the setup script and the generated password saved in `/etc/caid/caid.env`.
 
 To add a new app manually:
 
