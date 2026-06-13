@@ -95,6 +95,7 @@ EOF
 
 bao_root() {
   local token="$1"
+  shift
   compose exec -T openbao env BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN="$token" "$@"
 }
 
