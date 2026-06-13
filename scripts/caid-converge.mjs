@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const rootDir = process.cwd();
 const args = process.argv.slice(2);
@@ -71,33 +72,38 @@ function requestId(service, key) {
 
 const generatedConfigDefaults = {
   netbird: {
-    NETBIRD_HOST: process.env.NETBIRD_HOST,
-    NETBIRD_OIDC_CLIENT_SECRET: process.env.NETBIRD_OIDC_CLIENT_SECRET,
+    NETBIRD_HOST: { value: process.env.NETBIRD_HOST, generate: false },
+    NETBIRD_OIDC_CLIENT_SECRET: {
+      value: process.env.NETBIRD_OIDC_CLIENT_SECRET,
+      generate: true,
+    },
   },
   logging: {
-    GRAFANA_HOST: process.env.GRAFANA_HOST,
-    GRAFANA_ADMIN_PASSWORD: process.env.GRAFANA_ADMIN_PASSWORD,
+    GRAFANA_HOST: { value: process.env.GRAFANA_HOST, generate: false },
+    GRAFANA_ADMIN_PASSWORD: { value: process.env.GRAFANA_ADMIN_PASSWORD, generate: true },
   },
 };
+
+function generatedSecret() {
+  return crypto.randomBytes(32).toString("base64url");
+}
 
 async function seedGeneratedDefaults(schema) {
   for (const service of schema.services ?? []) {
     const defaults = generatedConfigDefaults[service.service] ?? {};
-    const nonEmptyDefaults = Object.fromEntries(
-      Object.entries(defaults).filter(([, value]) => typeof value === "string" && value !== ""),
-    );
-
-    if (!Object.keys(nonEmptyDefaults).length) {
-      continue;
-    }
-
     const values = await readKv(service.openbaoPath);
     const merged = { ...values };
     let changed = false;
 
-    for (const [key, value] of Object.entries(nonEmptyDefaults)) {
+    for (const [key, spec] of Object.entries(defaults)) {
       if (merged[key] === undefined || merged[key] === "") {
-        merged[key] = value;
+        if (typeof spec.value === "string" && spec.value !== "") {
+          merged[key] = spec.value;
+        } else if (spec.generate) {
+          merged[key] = generatedSecret();
+        } else {
+          continue;
+        }
         changed = true;
       }
     }
