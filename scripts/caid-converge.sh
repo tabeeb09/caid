@@ -108,6 +108,10 @@ main() {
   BAO_ADDR="$converge_bao_addr" \
     BAO_TOKEN="$token" \
     BAO_KV_MOUNT="${BAO_KV_MOUNT:-kv}" \
+    NETBIRD_HOST="${NETBIRD_HOST:-}" \
+    NETBIRD_OIDC_CLIENT_SECRET="${NETBIRD_OIDC_CLIENT_SECRET:-}" \
+    GRAFANA_HOST="${GRAFANA_HOST:-}" \
+    GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-}" \
     node scripts/caid-converge.mjs --mode "$MODE"
 }
 

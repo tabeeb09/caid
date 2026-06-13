@@ -69,8 +69,48 @@ function requestId(service, key) {
   return `${service}:${key}`;
 }
 
+const generatedConfigDefaults = {
+  netbird: {
+    NETBIRD_HOST: process.env.NETBIRD_HOST,
+    NETBIRD_OIDC_CLIENT_SECRET: process.env.NETBIRD_OIDC_CLIENT_SECRET,
+  },
+  logging: {
+    GRAFANA_HOST: process.env.GRAFANA_HOST,
+    GRAFANA_ADMIN_PASSWORD: process.env.GRAFANA_ADMIN_PASSWORD,
+  },
+};
+
+async function seedGeneratedDefaults(schema) {
+  for (const service of schema.services ?? []) {
+    const defaults = generatedConfigDefaults[service.service] ?? {};
+    const nonEmptyDefaults = Object.fromEntries(
+      Object.entries(defaults).filter(([, value]) => typeof value === "string" && value !== ""),
+    );
+
+    if (!Object.keys(nonEmptyDefaults).length) {
+      continue;
+    }
+
+    const values = await readKv(service.openbaoPath);
+    const merged = { ...values };
+    let changed = false;
+
+    for (const [key, value] of Object.entries(nonEmptyDefaults)) {
+      if (merged[key] === undefined || merged[key] === "") {
+        merged[key] = value;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await writeKv(service.openbaoPath, merged);
+    }
+  }
+}
+
 async function main() {
   const schema = loadSchema();
+  await seedGeneratedDefaults(schema);
   const existingRequests = await readKv(config.requestPath);
   const now = new Date().toISOString();
   const requests = { ...existingRequests };
