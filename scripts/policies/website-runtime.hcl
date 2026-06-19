@@ -14,6 +14,10 @@ path "kv/data/keycloak/prod" {
   capabilities = ["read"]
 }
 
+path "kv/data/print/prod" {
+  capabilities = ["read", "update"]
+}
+
 path "kv/data/caid/config-requests" {
   capabilities = ["read", "update"]
 }
