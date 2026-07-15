@@ -232,7 +232,7 @@ ensure_keycloak_identity_roles() {
   website_uuid="$(keycloak_client_id website)"
   openbao_uuid="$(ensure_keycloak_client openbao "$openbao_secret" "https://$BAO_HOST/ui/vault/auth/oidc/oidc/callback" "https://$BAO_HOST" false)"
 
-  for role in owner media_admin editor viewer infra_admin identity_hr_manager config_admin audit_admin logging_admin openbao_admin rustfs_admin netbird_admin technician print_admin queue_admin upload_quota_1kb upload_quota_250mb upload_quota_1gb; do
+  for role in owner media_admin editor viewer infra_admin identity_hr_manager config_admin audit_admin logging_admin openbao_admin rustfs_admin netbird_admin technician print_admin queue_admin asset_admin upload_quota_1kb upload_quota_250mb upload_quota_1gb; do
     kcadm create "clients/$website_uuid/roles" -r "$KEYCLOAK_REALM" -s "name=$role" >/dev/null 2>&1 || true
     ensure_keycloak_group "$role"
   done
