@@ -1,9 +1,6 @@
 name: CAId Converge VPS
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
