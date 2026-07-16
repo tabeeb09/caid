@@ -210,6 +210,16 @@ write_env_file() {
   prompt_optional_if_unset GOOGLE_CLIENT_ID "Optional Google OAuth client ID; leave blank to skip" ""
   prompt_optional_if_unset GOOGLE_CLIENT_SECRET "Optional Google OAuth client secret; leave blank to skip" "" true
   prompt_optional_if_unset ALLOWED_EMAILS "Optional comma-separated allowed emails/domains; leave blank to skip" ""
+  KEYCLOAK_SMTP_HOST="${KEYCLOAK_SMTP_HOST:-}"
+  KEYCLOAK_SMTP_PORT="${KEYCLOAK_SMTP_PORT:-587}"
+  KEYCLOAK_SMTP_FROM="${KEYCLOAK_SMTP_FROM:-no-reply@$AUTH_HOST}"
+  KEYCLOAK_SMTP_FROM_DISPLAY_NAME="${KEYCLOAK_SMTP_FROM_DISPLAY_NAME:-CAId}"
+  KEYCLOAK_SMTP_REPLY_TO="${KEYCLOAK_SMTP_REPLY_TO:-}"
+  KEYCLOAK_SMTP_SSL="${KEYCLOAK_SMTP_SSL:-false}"
+  KEYCLOAK_SMTP_STARTTLS="${KEYCLOAK_SMTP_STARTTLS:-true}"
+  KEYCLOAK_SMTP_AUTH="${KEYCLOAK_SMTP_AUTH:-true}"
+  KEYCLOAK_SMTP_USER="${KEYCLOAK_SMTP_USER:-}"
+  KEYCLOAK_SMTP_PASSWORD="${KEYCLOAK_SMTP_PASSWORD:-}"
   prompt_optional_if_unset DNS_PROVIDER "Optional DNS provider for automated records; none or cloudflare" "none"
   DNS_PROVIDER="$(printf '%s' "${DNS_PROVIDER:-none}" | tr '[:upper:]' '[:lower:]')"
   if [[ "$DNS_PROVIDER" == "cloudflare" ]]; then
@@ -339,6 +349,16 @@ RUSTFS_BUCKET=$RUSTFS_BUCKET
 GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
 GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
 ALLOWED_EMAILS=${ALLOWED_EMAILS:-}
+KEYCLOAK_SMTP_HOST=$KEYCLOAK_SMTP_HOST
+KEYCLOAK_SMTP_PORT=$KEYCLOAK_SMTP_PORT
+KEYCLOAK_SMTP_FROM=$KEYCLOAK_SMTP_FROM
+KEYCLOAK_SMTP_FROM_DISPLAY_NAME=$KEYCLOAK_SMTP_FROM_DISPLAY_NAME
+KEYCLOAK_SMTP_REPLY_TO=$KEYCLOAK_SMTP_REPLY_TO
+KEYCLOAK_SMTP_SSL=$KEYCLOAK_SMTP_SSL
+KEYCLOAK_SMTP_STARTTLS=$KEYCLOAK_SMTP_STARTTLS
+KEYCLOAK_SMTP_AUTH=$KEYCLOAK_SMTP_AUTH
+KEYCLOAK_SMTP_USER=$KEYCLOAK_SMTP_USER
+KEYCLOAK_SMTP_PASSWORD=$KEYCLOAK_SMTP_PASSWORD
 DNS_PROVIDER=$DNS_PROVIDER
 CLOUDFLARE_ZONE_NAME=$CLOUDFLARE_ZONE_NAME
 CLOUDFLARE_ZONE_ID=$CLOUDFLARE_ZONE_ID
@@ -954,6 +974,43 @@ ensure_initial_owner_user() {
   done
 }
 
+configure_keycloak_account_recovery() {
+  kcadm update "realms/$KEYCLOAK_REALM" \
+    -s registrationAllowed=true \
+    -s registrationEmailAsUsername=true \
+    -s loginWithEmailAllowed=true \
+    -s duplicateEmailsAllowed=false \
+    -s verifyEmail=false \
+    -s resetPasswordAllowed=true \
+    -s rememberMe=true >/dev/null
+
+  if [[ -z "${KEYCLOAK_SMTP_HOST:-}" ]]; then
+    echo "Keycloak password reset is enabled. Set KEYCLOAK_SMTP_HOST in $ENV_FILE to allow reset emails to be sent."
+    return
+  fi
+
+  kcadm update "realms/$KEYCLOAK_REALM" \
+    -s "smtpServer.host=$KEYCLOAK_SMTP_HOST" \
+    -s "smtpServer.port=${KEYCLOAK_SMTP_PORT:-587}" \
+    -s "smtpServer.from=${KEYCLOAK_SMTP_FROM:-no-reply@$AUTH_HOST}" \
+    -s "smtpServer.fromDisplayName=${KEYCLOAK_SMTP_FROM_DISPLAY_NAME:-CAId}" \
+    -s "smtpServer.ssl=${KEYCLOAK_SMTP_SSL:-false}" \
+    -s "smtpServer.starttls=${KEYCLOAK_SMTP_STARTTLS:-true}" \
+    -s "smtpServer.auth=${KEYCLOAK_SMTP_AUTH:-true}" >/dev/null
+
+  if [[ -n "${KEYCLOAK_SMTP_REPLY_TO:-}" ]]; then
+    kcadm update "realms/$KEYCLOAK_REALM" -s "smtpServer.replyTo=$KEYCLOAK_SMTP_REPLY_TO" >/dev/null
+  fi
+
+  if [[ -n "${KEYCLOAK_SMTP_USER:-}" ]]; then
+    kcadm update "realms/$KEYCLOAK_REALM" -s "smtpServer.user=$KEYCLOAK_SMTP_USER" >/dev/null
+  fi
+
+  if [[ -n "${KEYCLOAK_SMTP_PASSWORD:-}" ]]; then
+    kcadm update "realms/$KEYCLOAK_REALM" -s "smtpServer.password=$KEYCLOAK_SMTP_PASSWORD" >/dev/null
+  fi
+}
+
 bootstrap_keycloak() {
   echo "Bootstrapping Keycloak realm, clients, and roles..."
   kcadm config credentials \
@@ -963,12 +1020,7 @@ bootstrap_keycloak() {
     --password "$KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null
 
   kcadm create realms -s "realm=$KEYCLOAK_REALM" -s enabled=true >/dev/null 2>&1 || true
-  kcadm update "realms/$KEYCLOAK_REALM" \
-    -s registrationAllowed=true \
-    -s registrationEmailAsUsername=true \
-    -s loginWithEmailAllowed=true \
-    -s duplicateEmailsAllowed=false \
-    -s verifyEmail=false >/dev/null
+  configure_keycloak_account_recovery
   kcadm update "authentication/required-actions/CONFIGURE_TOTP" -r "$KEYCLOAK_REALM" \
     -s enabled=true \
     -s defaultAction=true >/dev/null 2>&1 || true

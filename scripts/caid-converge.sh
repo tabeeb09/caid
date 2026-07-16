@@ -215,6 +215,43 @@ ensure_groups_mapper() {
     -s 'config."userinfo.token.claim"=true' >/dev/null
 }
 
+ensure_keycloak_account_recovery() {
+  kcadm update "realms/$KEYCLOAK_REALM" \
+    -s registrationAllowed=true \
+    -s registrationEmailAsUsername=true \
+    -s loginWithEmailAllowed=true \
+    -s duplicateEmailsAllowed=false \
+    -s verifyEmail=false \
+    -s resetPasswordAllowed=true \
+    -s rememberMe=true >/dev/null
+
+  if [[ -z "${KEYCLOAK_SMTP_HOST:-}" ]]; then
+    echo "Keycloak password reset is enabled. Set KEYCLOAK_SMTP_HOST in $ENV_FILE to allow reset emails to be sent."
+    return
+  fi
+
+  kcadm update "realms/$KEYCLOAK_REALM" \
+    -s "smtpServer.host=$KEYCLOAK_SMTP_HOST" \
+    -s "smtpServer.port=${KEYCLOAK_SMTP_PORT:-587}" \
+    -s "smtpServer.from=${KEYCLOAK_SMTP_FROM:-no-reply@$AUTH_HOST}" \
+    -s "smtpServer.fromDisplayName=${KEYCLOAK_SMTP_FROM_DISPLAY_NAME:-CAId}" \
+    -s "smtpServer.ssl=${KEYCLOAK_SMTP_SSL:-false}" \
+    -s "smtpServer.starttls=${KEYCLOAK_SMTP_STARTTLS:-true}" \
+    -s "smtpServer.auth=${KEYCLOAK_SMTP_AUTH:-true}" >/dev/null
+
+  if [[ -n "${KEYCLOAK_SMTP_REPLY_TO:-}" ]]; then
+    kcadm update "realms/$KEYCLOAK_REALM" -s "smtpServer.replyTo=$KEYCLOAK_SMTP_REPLY_TO" >/dev/null
+  fi
+
+  if [[ -n "${KEYCLOAK_SMTP_USER:-}" ]]; then
+    kcadm update "realms/$KEYCLOAK_REALM" -s "smtpServer.user=$KEYCLOAK_SMTP_USER" >/dev/null
+  fi
+
+  if [[ -n "${KEYCLOAK_SMTP_PASSWORD:-}" ]]; then
+    kcadm update "realms/$KEYCLOAK_REALM" -s "smtpServer.password=$KEYCLOAK_SMTP_PASSWORD" >/dev/null
+  fi
+}
+
 ensure_keycloak_identity_roles() {
   local openbao_secret="$1"
   local website_uuid openbao_uuid
@@ -224,6 +261,8 @@ ensure_keycloak_identity_roles() {
     --realm master \
     --user "$KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME" \
     --password "$KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null
+
+  ensure_keycloak_account_recovery
 
   kcadm update "authentication/required-actions/CONFIGURE_TOTP" -r "$KEYCLOAK_REALM" \
     -s enabled=true \
