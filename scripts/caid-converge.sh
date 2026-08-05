@@ -47,6 +47,64 @@ compose() {
   docker compose --env-file "$ENV_FILE" -f "$CAID_HOME/docker-compose.yaml" "$@"
 }
 
+openbao_sealed_from_status() {
+  node -e "const fs=require('fs');const input=fs.readFileSync(0,'utf8');const data=JSON.parse(input);process.stdout.write(data.sealed ? 'true' : 'false');"
+}
+
+openbao_status_json() {
+  set +e
+  compose exec -T openbao env BAO_ADDR=http://127.0.0.1:8200 bao status -format=json 2>/dev/null
+  local status="$?"
+  set -e
+
+  # `bao status` can return a non-zero status for a sealed but reachable server.
+  # The caller validates the JSON payload rather than the exit code alone.
+  if [[ "$status" -ne 0 && "$status" -ne 2 ]]; then
+    return "$status"
+  fi
+}
+
+unseal_key() {
+  if [[ ! -f "$RECOVERY_FILE" ]]; then
+    echo "Missing OpenBao recovery file: $RECOVERY_FILE" >&2
+    exit 1
+  fi
+
+  node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));const keys=data.unseal_keys_b64||data.keys_base64||data.keys||data.unseal_keys_hex||[];if(!keys[0])process.exit(1);process.stdout.write(keys[0]);" "$RECOVERY_FILE"
+}
+
+ensure_openbao_unsealed() {
+  local status_json sealed key
+
+  status_json="$(openbao_status_json)"
+  if [[ -z "$status_json" ]]; then
+    echo "Unable to read OpenBao status." >&2
+    exit 1
+  fi
+
+  sealed="$(printf '%s' "$status_json" | openbao_sealed_from_status)"
+  if [[ "$sealed" != "true" ]]; then
+    return
+  fi
+
+  echo "OpenBao is sealed; unsealing from server recovery file."
+  key="$(unseal_key)" || {
+    echo "Unable to read an OpenBao unseal key from $RECOVERY_FILE" >&2
+    exit 1
+  }
+
+  compose exec -T openbao env \
+    BAO_ADDR=http://127.0.0.1:8200 \
+    bao operator unseal "$key" >/dev/null
+
+  status_json="$(openbao_status_json)"
+  sealed="$(printf '%s' "$status_json" | openbao_sealed_from_status)"
+  if [[ "$sealed" == "true" ]]; then
+    echo "OpenBao is still sealed after unseal attempt." >&2
+    exit 1
+  fi
+}
+
 random_b64url() {
   local bytes="${1:-32}"
   openssl rand -base64 "$bytes" | tr '+/' '-_' | tr -d '=\n'
@@ -324,6 +382,7 @@ main() {
   load_env
 
   cd "$CAID_HOME"
+  ensure_openbao_unsealed
   token="$(root_token)"
   ensure_runtime_policy "$token"
   ensure_openbao_admin_policy "$token"
